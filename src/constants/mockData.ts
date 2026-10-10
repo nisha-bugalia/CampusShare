@@ -9,9 +9,34 @@ export const CATEGORIES: ListingCategory[] = [
   'Sports',
 ];
 
+export interface StudentProfile {
+  id: string;
+  name: string;
+  branch: string;
+  hostel: string;
+  status: string;
+}
+
+export const CURRENT_USER: StudentProfile = {
+  id: 'user_nisha',
+  name: 'Nisha',
+  branch: 'Computer Engineering',
+  hostel: 'Hostel 4',
+  status: 'Verified Student',
+};
+
+export const isCurrentUserListing = (item: Listing): boolean => {
+  return item.ownerName === CURRENT_USER.name || item.ownerName === 'You';
+};
+
+export const isCurrentUserRequest = (item: RequestItem): boolean => {
+  return item.requesterName === CURRENT_USER.name || item.requesterName === 'You';
+};
+
 export const MOCK_LISTINGS: Listing[] = [
   {
     id: 'l1',
+    user_id: 'mock_user_arjun',
     title: 'Scientific Calculator (Casio fx-991EX)',
     category: 'Electronics',
     mode: 'RENT',
@@ -25,6 +50,7 @@ export const MOCK_LISTINGS: Listing[] = [
   },
   {
     id: 'l2',
+    user_id: 'mock_user_rahul',
     title: 'Black Blazer (Formal, Size 40)',
     category: 'Clothing',
     mode: 'SELL',
@@ -38,6 +64,7 @@ export const MOCK_LISTINGS: Listing[] = [
   },
   {
     id: 'l3',
+    user_id: 'mock_user_priya',
     title: 'High-Speed 2m HDMI Cable',
     category: 'Electronics',
     mode: 'RENT',
@@ -51,6 +78,7 @@ export const MOCK_LISTINGS: Listing[] = [
   },
   {
     id: 'l4',
+    user_id: 'mock_user_sneha',
     title: 'Engineering Mathematics (H.K. Dass)',
     category: 'Books',
     mode: 'FREE',
@@ -64,6 +92,7 @@ export const MOCK_LISTINGS: Listing[] = [
   },
   {
     id: 'l5',
+    user_id: 'mock_user_divya',
     title: 'White Cotton Lab Coat (Size M)',
     category: 'Lab Equipment',
     mode: 'RENT',
@@ -80,6 +109,7 @@ export const MOCK_LISTINGS: Listing[] = [
 export const MOCK_REQUESTS: RequestItem[] = [
   {
     id: 'r1',
+    user_id: 'mock_user_vikram',
     title: 'Need a scientific calculator for semester exams',
     category: 'Electronics',
     urgency: 'Urgent',
@@ -93,6 +123,7 @@ export const MOCK_REQUESTS: RequestItem[] = [
   },
   {
     id: 'r2',
+    user_id: 'mock_user_karan',
     title: 'Looking for a black formal blazer for placement interviews',
     category: 'Clothing',
     urgency: 'Needed',
@@ -106,6 +137,7 @@ export const MOCK_REQUESTS: RequestItem[] = [
   },
   {
     id: 'r3',
+    user_id: 'mock_user_ananya',
     title: 'Need an HDMI adapter for a presentation',
     category: 'Electronics',
     urgency: 'Needed',
@@ -119,6 +151,7 @@ export const MOCK_REQUESTS: RequestItem[] = [
   },
   {
     id: 'r4',
+    user_id: 'mock_user_meera',
     title: 'Looking for Engineering Mathematics textbook',
     category: 'Books',
     urgency: 'Needed',
@@ -132,6 +165,7 @@ export const MOCK_REQUESTS: RequestItem[] = [
   },
   {
     id: 'r5',
+    user_id: 'mock_user_riya',
     title: 'Lab coat for Chemistry practical',
     category: 'Lab Equipment',
     urgency: 'Urgent',

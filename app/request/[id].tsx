@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   StyleSheet,
   Text,
@@ -7,18 +7,142 @@ import {
   TouchableOpacity,
   Alert,
   SafeAreaView,
+  ActivityIndicator,
+  Image,
 } from 'react-native';
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
 import { useMarketplace } from '../../src/context/MarketplaceContext';
 import { Colors } from '../../src/constants/colors';
 import { Spacing, BorderRadius } from '../../src/constants/layout';
+import { RequestItem, ListingCategory } from '../../src/types/listing';
+import { supabase } from '../../src/lib/supabase';
+import { useAuth } from '../../src/context/AuthContext';
+import { getOrCreateRequestConversation } from '../../src/services/chatService';
+import {
+  formatTimeAgo,
+  formatBudget,
+  getCategoryIcon,
+} from '../../src/utils/adapters';
 
 export default function RequestDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
 
   const { requests } = useMarketplace();
-  const request = requests.find((item) => item.id === id);
+  const { user } = useAuth();
+  const localRequest = requests.find((item) => item.id === id);
+
+  const [dbRequest, setDbRequest] = useState<RequestItem | null>(null);
+  const [isLoadingDb, setIsLoadingDb] = useState<boolean>(!localRequest && !!id);
+  const [isStartingChat, setIsStartingChat] = useState<boolean>(false);
+
+  useEffect(() => {
+    if (!id) {
+      setIsLoadingDb(false);
+      return;
+    }
+
+    let isMounted = true;
+    if (!localRequest) {
+      setIsLoadingDb(true);
+    }
+
+    const fetchDbRequest = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('requests')
+          .select('*, profiles(id, name, branch, hostel, avatar_url, verified)')
+          .eq('id', id)
+          .single();
+
+        if (error || !data) {
+          if (isMounted) {
+            if (!localRequest) setDbRequest(null);
+            setIsLoadingDb(false);
+          }
+          return;
+        }
+
+        // Retrieve requester profile: first from join, then fallback to direct query by user_id
+        let requesterProfile = data.profiles as {
+          id?: string;
+          name?: string | null;
+          branch?: string | null;
+          hostel?: string | null;
+          avatar_url?: string | null;
+          verified?: boolean;
+        } | null;
+
+        if (!requesterProfile?.name && data.user_id) {
+          const { data: directProfile } = await supabase
+            .from('profiles')
+            .select('id, name, branch, hostel, avatar_url, verified')
+            .eq('id', data.user_id)
+            .single();
+
+          if (directProfile) {
+            requesterProfile = directProfile;
+          }
+        }
+
+        const requesterName =
+          requesterProfile?.name || localRequest?.requesterName || 'Campus User';
+        const requesterBranch = requesterProfile?.branch
+          ? `${requesterProfile.branch}, NIT Kurukshetra`
+          : localRequest?.requesterBranch || 'NIT Kurukshetra';
+        const requesterHostel = requesterProfile?.hostel || data.hostel;
+
+        const mapped: RequestItem = {
+          id: data.id,
+          user_id: data.user_id,
+          title: data.title,
+          category: data.category as Exclude<ListingCategory, 'All'>,
+          urgency: 'Needed',
+          budget: formatBudget(data.budget),
+          hostel: data.hostel,
+          description: data.description,
+          icon: getCategoryIcon(data.category),
+          timeAgo: formatTimeAgo(data.created_at),
+          requesterName,
+          requesterBranch,
+          requesterHostel,
+          requesterAvatarUrl:
+            requesterProfile?.avatar_url || localRequest?.requesterAvatarUrl || null,
+          requesterVerified:
+            requesterProfile?.verified ?? localRequest?.requesterVerified ?? false,
+        };
+
+        if (isMounted) {
+          setDbRequest(mapped);
+          setIsLoadingDb(false);
+        }
+      } catch (err) {
+        console.warn('[RequestDetail] Error fetching request from Supabase:', err);
+        if (isMounted) {
+          if (!localRequest) setDbRequest(null);
+          setIsLoadingDb(false);
+        }
+      }
+    };
+
+    fetchDbRequest();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [id]);
+
+  const request = dbRequest || localRequest;
+
+  if (isLoadingDb) {
+    return (
+      <SafeAreaView style={styles.loadingContainer}>
+        <Stack.Screen options={{ title: 'Loading...' }} />
+        <ActivityIndicator size="large" color={Colors.light.primary} />
+        <Text style={styles.loadingText}>Loading request details...</Text>
+      </SafeAreaView>
+    );
+  }
 
   if (!request) {
     return (
@@ -51,12 +175,54 @@ export default function RequestDetailScreen() {
     );
   };
 
-  const handleComingSoon = () => {
-    Alert.alert(
-      'I Have This Item',
-      'This feature is coming soon! Stay tuned.',
-      [{ text: 'OK', style: 'default' }]
-    );
+  const handleChat = async () => {
+    if (isStartingChat) return;
+
+    if (!user?.id) {
+      Alert.alert(
+        'Sign In Required',
+        'Please sign in to start a chat with the requester.',
+        [{ text: 'OK' }]
+      );
+      return;
+    }
+
+    if (!request?.user_id) {
+      Alert.alert('Error', 'Requester information is unavailable.');
+      return;
+    }
+
+    if (user.id === request.user_id) {
+      Alert.alert(
+        'Your Request',
+        'This is your own request. You cannot start a conversation with yourself.',
+        [{ text: 'OK' }]
+      );
+      return;
+    }
+
+    try {
+      setIsStartingChat(true);
+      const { conversationId, error } = await getOrCreateRequestConversation(
+        request.id,
+        request.user_id,
+        user.id
+      );
+
+      if (error || !conversationId) {
+        Alert.alert(
+          'Chat Error',
+          error?.message || 'Could not open conversation. Please try again.'
+        );
+        return;
+      }
+
+      router.push(`/chat/${conversationId}`);
+    } catch (err: any) {
+      Alert.alert('Chat Error', err?.message || 'An unexpected error occurred.');
+    } finally {
+      setIsStartingChat(false);
+    }
   };
 
   return (
@@ -96,7 +262,7 @@ export default function RequestDetailScreen() {
           <View style={styles.metaRow}>
             <View style={styles.metaItem}>
               <Text style={styles.metaIcon}>📍</Text>
-              <Text style={styles.metaText}>{request.hostel}</Text>
+              <Text style={styles.metaText}>{request.requesterHostel || request.hostel}</Text>
             </View>
             <View style={styles.metaDivider} />
             <View style={styles.metaItem}>
@@ -120,15 +286,31 @@ export default function RequestDetailScreen() {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Requested by</Text>
           <View style={styles.requesterCard}>
-            <View style={styles.requesterAvatar}>
-              <Text style={styles.requesterAvatarText}>
-                {request.requesterName.charAt(0).toUpperCase()}
-              </Text>
-            </View>
+            {request.requesterAvatarUrl ? (
+              <Image
+                source={{ uri: request.requesterAvatarUrl }}
+                style={styles.requesterAvatarImage}
+              />
+            ) : (
+              <View style={styles.requesterAvatar}>
+                <Text style={styles.requesterAvatarText}>
+                  {request.requesterName.charAt(0).toUpperCase()}
+                </Text>
+              </View>
+            )}
             <View style={styles.requesterInfo}>
-              <Text style={styles.requesterName}>{request.requesterName}</Text>
+              <View style={styles.requesterNameRow}>
+                <Text style={styles.requesterName}>{request.requesterName}</Text>
+                {request.requesterVerified && (
+                  <View style={styles.verifiedBadge}>
+                    <Text style={styles.verifiedBadgeText}>✓</Text>
+                  </View>
+                )}
+              </View>
               <Text style={styles.requesterBranch}>{request.requesterBranch}</Text>
-              <Text style={styles.requesterHostel}>{request.hostel}</Text>
+              <Text style={styles.requesterHostel}>
+                {request.requesterHostel || request.hostel}
+              </Text>
             </View>
           </View>
         </View>
@@ -136,14 +318,19 @@ export default function RequestDetailScreen() {
         <View style={{ height: 100 }} />
       </ScrollView>
 
-      {/* Sticky Bottom Button */}
+      {/* Sticky Bottom Bar */}
       <View style={styles.bottomBar}>
         <TouchableOpacity
-          style={styles.haveButton}
+          style={[styles.actionButton, styles.chatButton, isStartingChat && { opacity: 0.7 }]}
           activeOpacity={0.8}
-          onPress={handleComingSoon}
+          onPress={handleChat}
+          disabled={isStartingChat}
         >
-          <Text style={styles.haveButtonText}>✋  I Have This Item</Text>
+          {isStartingChat ? (
+            <ActivityIndicator size="small" color="#FFFFFF" />
+          ) : (
+            <Text style={styles.chatButtonText}>💬  Chat with Requester</Text>
+          )}
         </TouchableOpacity>
       </View>
     </SafeAreaView>
@@ -160,6 +347,19 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     paddingBottom: 24,
+  },
+
+  loadingContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#F8FAFC',
+    gap: 12,
+  },
+  loadingText: {
+    fontSize: 14,
+    color: '#64748B',
+    fontWeight: '500',
   },
 
   // Icon Banner
@@ -300,6 +500,13 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginRight: 14,
   },
+  requesterAvatarImage: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    marginRight: 14,
+    backgroundColor: '#FDE68A',
+  },
   requesterAvatarText: {
     fontSize: 20,
     fontWeight: '800',
@@ -308,11 +515,29 @@ const styles = StyleSheet.create({
   requesterInfo: {
     flex: 1,
   },
+  requesterNameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 2,
+  },
   requesterName: {
     fontSize: 15,
     fontWeight: '700',
     color: '#0F172A',
-    marginBottom: 2,
+  },
+  verifiedBadge: {
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: '#10B981',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  verifiedBadgeText: {
+    color: '#FFFFFF',
+    fontSize: 10,
+    fontWeight: '800',
   },
   requesterBranch: {
     fontSize: 13,
@@ -324,28 +549,33 @@ const styles = StyleSheet.create({
     color: '#94A3B8',
   },
 
-  // Bottom Button
+  // Bottom Buttons
   bottomBar: {
+    flexDirection: 'row',
+    gap: 12,
     paddingHorizontal: Spacing.md,
     paddingVertical: 14,
     backgroundColor: '#FFFFFF',
     borderTopWidth: 1,
     borderTopColor: '#E2E8F0',
   },
-  haveButton: {
-    backgroundColor: '#F59E0B',
-    paddingVertical: 16,
+  actionButton: {
+    flex: 1,
+    paddingVertical: 14,
     borderRadius: BorderRadius.md,
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#F59E0B',
+  },
+  chatButton: {
+    backgroundColor: Colors.light.primary,
+    shadowColor: Colors.light.primary,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 8,
     elevation: 4,
   },
-  haveButtonText: {
-    fontSize: 16,
+  chatButtonText: {
+    fontSize: 15,
     fontWeight: '700',
     color: '#FFFFFF',
   },

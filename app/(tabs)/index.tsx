@@ -1,4 +1,4 @@
-﻿import React, { useState } from 'react';
+import React, { useState } from 'react';
 import {
   StyleSheet,
   Text,
@@ -6,22 +6,30 @@ import {
   ScrollView,
   TouchableOpacity,
   FlatList,
+  ActivityIndicator,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useFocusEffect } from 'expo-router';
 import { Colors } from '../../src/constants/colors';
 import { Spacing, BorderRadius } from '../../src/constants/layout';
 import { CATEGORIES } from '../../src/constants/mockData';
-import { Listing, RequestItem, ListingCategory, ItemMode } from '../../src/types/listing';
+import { Listing, RequestItem, ListingCategory } from '../../src/types/listing';
+import ListingCard from '../../src/components/ListingCard';
 import RequestCard from '../../src/components/RequestCard';
 import { useMarketplace } from '../../src/context/MarketplaceContext';
 
 type FeedType = 'HAVE' | 'NEED';
 
 export default function HomeScreen() {
-  const router = useRouter();
-  const { listings, requests } = useMarketplace();
+  const { listings, requests, isLoading, error, refresh } = useMarketplace();
   const [feedType, setFeedType] = useState<FeedType>('HAVE');
   const [selectedCategory, setSelectedCategory] = useState<ListingCategory>('All');
+
+  // Re-fetch every time the Home tab comes into focus so newly created posts appear.
+  useFocusEffect(
+    React.useCallback(() => {
+      refresh();
+    }, [refresh])
+  );
 
   const filteredListings =
     selectedCategory === 'All'
@@ -33,67 +41,64 @@ export default function HomeScreen() {
       ? requests
       : requests.filter((item) => item.category === selectedCategory);
 
-  const renderModeBadge = (mode: ItemMode) => {
-    switch (mode) {
-      case 'RENT':
-        return (
-          <View style={[styles.badge, styles.badgeRent]}>
-            <Text style={styles.badgeRentText}>FOR RENT</Text>
-          </View>
-        );
-      case 'SELL':
-        return (
-          <View style={[styles.badge, styles.badgeSell]}>
-            <Text style={styles.badgeSellText}>FOR SALE</Text>
-          </View>
-        );
-      case 'FREE':
-        return (
-          <View style={[styles.badge, styles.badgeFree]}>
-            <Text style={styles.badgeFreeText}>FREE</Text>
-          </View>
-        );
-    }
-  };
-
   const renderListingCard = ({ item }: { item: Listing }) => (
-    <TouchableOpacity
-      style={styles.card}
-      activeOpacity={0.75}
-      onPress={() => router.push(`/listing/${item.id}`)}
-    >
-      <View style={styles.cardHeader}>
-        {renderModeBadge(item.mode)}
-        <Text style={styles.timeAgo}>{item.timeAgo}</Text>
-      </View>
-
-      <View style={styles.cardMain}>
-        <View style={styles.imagePlaceholder}>
-          <Text style={styles.itemGlyph}>{item.icon}</Text>
-          <Text style={styles.placeholderLabel}>PHOTO</Text>
-        </View>
-
-        <View style={styles.cardInfo}>
-          <Text style={styles.itemTitle} numberOfLines={2}>
-            {item.title}
-          </Text>
-          <Text style={styles.itemPrice}>{item.price}</Text>
-          <View style={styles.locationRow}>
-            <Text style={styles.locationPin}>📍</Text>
-            <Text style={styles.locationText}>{item.hostel}</Text>
-          </View>
-        </View>
-      </View>
-
-      <Text style={styles.itemDescription} numberOfLines={2}>
-        {item.description}
-      </Text>
-    </TouchableOpacity>
+    <ListingCard item={item} />
   );
 
   const renderRequestCard = ({ item }: { item: RequestItem }) => (
     <RequestCard item={item} />
   );
+
+  // ── Loading state ─────────────────────────────────────────────────────────
+  if (isLoading) {
+    return (
+      <View style={styles.screen}>
+        {/* Keep toggle + category bar visible while loading */}
+        <View style={styles.toggleWrapper}>
+          <View style={styles.toggleContainer}>
+            <TouchableOpacity
+              style={[styles.toggleButton, feedType === 'HAVE' && styles.toggleButtonActive]}
+              onPress={() => setFeedType('HAVE')}
+              activeOpacity={0.8}
+            >
+              <Text style={[styles.toggleText, feedType === 'HAVE' && styles.toggleTextActive]}>
+                I HAVE
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.toggleButton, feedType === 'NEED' && styles.toggleButtonActive]}
+              onPress={() => setFeedType('NEED')}
+              activeOpacity={0.8}
+            >
+              <Text style={[styles.toggleText, feedType === 'NEED' && styles.toggleTextActive]}>
+                I NEED
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+        <View style={styles.centeredState}>
+          <ActivityIndicator size="large" color={Colors.light.primary} />
+          <Text style={styles.loadingText}>Loading campus posts…</Text>
+        </View>
+      </View>
+    );
+  }
+
+  // ── Error state ───────────────────────────────────────────────────────────
+  if (error) {
+    return (
+      <View style={styles.screen}>
+        <View style={styles.centeredState}>
+          <Text style={styles.emptyIcon}>⚠️</Text>
+          <Text style={styles.emptyTitle}>Couldn't load feed</Text>
+          <Text style={styles.emptySubtitle}>{error}</Text>
+          <TouchableOpacity style={styles.retryButton} onPress={refresh} activeOpacity={0.8}>
+            <Text style={styles.retryButtonText}>Retry</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.screen}>
@@ -168,8 +173,9 @@ export default function HomeScreen() {
                 <Text style={styles.emptyIcon}>📭</Text>
                 <Text style={styles.emptyTitle}>No items available</Text>
                 <Text style={styles.emptySubtitle}>
-                  No listings found under "{selectedCategory}". Try switching
-                  categories or selecting "All".
+                  {selectedCategory === 'All'
+                    ? 'Be the first to post something on CampusShare!'
+                    : `No listings found under "${selectedCategory}". Try switching categories or selecting "All".`}
                 </Text>
               </View>
             }
@@ -186,8 +192,9 @@ export default function HomeScreen() {
                 <Text style={styles.emptyIcon}>🔍</Text>
                 <Text style={styles.emptyTitle}>No requests found</Text>
                 <Text style={styles.emptySubtitle}>
-                  No community requests under "{selectedCategory}". Try
-                  selecting "All" to view all campus needs.
+                  {selectedCategory === 'All'
+                    ? 'No campus requests yet. Post what you need!'
+                    : `No community requests under "${selectedCategory}". Try selecting "All" to view all campus needs.`}
                 </Text>
               </View>
             }
@@ -202,6 +209,30 @@ const styles = StyleSheet.create({
   screen: {
     flex: 1,
     backgroundColor: Colors.light.background,
+  },
+  centeredState: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 32,
+  },
+  loadingText: {
+    marginTop: 12,
+    fontSize: 14,
+    color: Colors.light.textMuted,
+    fontWeight: '500',
+  },
+  retryButton: {
+    marginTop: 16,
+    backgroundColor: Colors.light.primary,
+    paddingHorizontal: 24,
+    paddingVertical: 10,
+    borderRadius: BorderRadius.md,
+  },
+  retryButtonText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '700',
   },
   toggleWrapper: {
     paddingHorizontal: Spacing.md,

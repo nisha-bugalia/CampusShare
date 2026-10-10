@@ -2,7 +2,7 @@
   "expo": {
     "name": "NIT Campus",
     "slug": "nit-campus",
-    "scheme": "nitcampus",
+    "scheme": "campusshare",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -18,14 +18,25 @@
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
       "package": "com.nitcampus.app",
-      "predictiveBackGestureEnabled": false
+      "googleServicesFile": "./google-services.json",
+      "predictiveBackGestureEnabled": false,
+      "softwareKeyboardLayoutMode": "resize"
     },
     "web": {
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
       "expo-router",
-      "expo-status-bar"
-    ]
+      "expo-status-bar",
+      "expo-web-browser",
+      "expo-image-picker",
+      "expo-notifications"
+    ],
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "6fb363a1-d277-4bb3-b6e3-1329dd2d5683"
+      }
+    }
   }
 }

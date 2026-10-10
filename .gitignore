@@ -32,6 +32,13 @@ yarn-error.*
 
 # local env files
 .env*.local
+.env
+
+# Supabase
+supabase/.temp/
+
+# Service account credentials
+*-firebase-adminsdk-*.json
 
 # typescript
 *.tsbuildinfo

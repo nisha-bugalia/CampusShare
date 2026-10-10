@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "286046705494",
+    "project_id": "campusshare-eec49",
+    "storage_bucket": "campusshare-eec49.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:286046705494:android:5d825095a3bb04693fa8f7",
+        "android_client_info": {
+          "package_name": "com.nitcampus.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDSFAeNO5607zvW-ZWmUsmT3x3nxL8H4pA"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

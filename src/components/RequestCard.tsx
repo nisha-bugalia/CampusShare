@@ -7,10 +7,21 @@ import { Spacing, BorderRadius } from '../constants/layout';
 
 interface RequestCardProps {
   item: RequestItem;
+  onPress?: () => void;
+  onEdit?: () => void;
+  onDelete?: () => void;
 }
 
-export default function RequestCard({ item }: RequestCardProps) {
+export default function RequestCard({ item, onPress, onEdit, onDelete }: RequestCardProps) {
   const router = useRouter();
+
+  const handlePress = () => {
+    if (onPress) {
+      onPress();
+    } else {
+      router.push(`/request/${item.id}`);
+    }
+  };
 
   const renderUrgencyBadge = () => {
     if (item.urgency === 'Urgent') {
@@ -31,7 +42,7 @@ export default function RequestCard({ item }: RequestCardProps) {
     <TouchableOpacity
       style={styles.card}
       activeOpacity={0.75}
-      onPress={() => router.push(`/request/${item.id}`)}
+      onPress={handlePress}
     >
       {/* Card Header: Badge + Time */}
       <View style={styles.cardHeader}>
@@ -75,6 +86,38 @@ export default function RequestCard({ item }: RequestCardProps) {
         <Text style={styles.requesterName}>{item.requesterName}</Text>
         <Text style={styles.requesterBranch}>  •  {item.requesterBranch}</Text>
       </View>
+
+      {(onEdit || onDelete) && (
+        <View style={styles.actionRow}>
+          {onEdit && (
+            <TouchableOpacity
+              style={styles.actionButton}
+              onPress={(e) => {
+                e.stopPropagation();
+                onEdit();
+              }}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.actionIcon}>✏️</Text>
+              <Text style={styles.actionTextEdit}>Edit</Text>
+            </TouchableOpacity>
+          )}
+          {onEdit && onDelete && <View style={styles.actionDivider} />}
+          {onDelete && (
+            <TouchableOpacity
+              style={styles.actionButton}
+              onPress={(e) => {
+                e.stopPropagation();
+                onDelete();
+              }}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.actionIcon}>🗑️</Text>
+              <Text style={styles.actionTextDelete}>Delete</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      )}
     </TouchableOpacity>
   );
 }
@@ -222,5 +265,40 @@ const styles = StyleSheet.create({
   requesterBranch: {
     fontSize: 12,
     color: Colors.light.textMuted,
+  },
+  actionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderTopWidth: 1,
+    borderTopColor: '#F1F5F9',
+    marginTop: Spacing.sm,
+    paddingTop: Spacing.xs,
+  },
+  actionButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 6,
+    borderRadius: BorderRadius.sm,
+  },
+  actionIcon: {
+    fontSize: 13,
+    marginRight: 6,
+  },
+  actionTextEdit: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: Colors.light.primary,
+  },
+  actionDivider: {
+    width: 1,
+    height: 16,
+    backgroundColor: '#E2E8F0',
+  },
+  actionTextDelete: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#DC2626',
   },
 });

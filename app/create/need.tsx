@@ -10,19 +10,21 @@ import {
   KeyboardAvoidingView,
   Platform,
   Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
 import { Colors } from '../../src/constants/colors';
 import { Spacing, BorderRadius } from '../../src/constants/layout';
-import { useMarketplace } from '../../src/context/MarketplaceContext';
-import { RequestItem, ListingCategory } from '../../src/types/listing';
+import { ListingCategory } from '../../src/types/listing';
+import { useAuth } from '../../src/context/AuthContext';
+import { supabase } from '../../src/lib/supabase';
+import { NIT_HOSTELS, NITHostel } from '../../src/constants/campus';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type Category = Exclude<ListingCategory, 'All'> | null;
 type Duration = 'One-time use' | 'A few days' | 'A few weeks' | 'Long term' | null;
-type Hostel = 'Hostel 1' | 'Hostel 2' | 'Hostel 3' | 'Hostel 4' | 'Hostel 5' | 'Other' | null;
-type Visibility = 'My Hostel' | 'Girls Hostel' | 'Boys Hostel' | 'Everyone' | null;
+type Hostel = NITHostel | null;
 
 interface FormErrors {
   itemNeeded?: string;
@@ -30,7 +32,6 @@ interface FormErrors {
   description?: string;
   budget?: string;
   hostel?: string;
-  visibility?: string;
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -43,33 +44,20 @@ const DURATIONS: Exclude<Duration, null>[] = [
   'One-time use', 'A few days', 'A few weeks', 'Long term',
 ];
 
-const HOSTELS: Exclude<Hostel, null>[] = [
-  'Hostel 1', 'Hostel 2', 'Hostel 3', 'Hostel 4', 'Hostel 5', 'Other',
-];
-
-const VISIBILITY_OPTIONS: Exclude<Visibility, null>[] = [
-  'My Hostel', 'Girls Hostel', 'Boys Hostel', 'Everyone',
-];
-
 const CATEGORY_ICONS: Record<string, string> = {
-  Books: '\uD83D\uDCDA',
-  Electronics: '\uD83D\uDCF1',
-  Clothing: '\uD83D\uDC55',
-  'Lab Equipment': '\uD83E\uDD7C',
-  Sports: '\u26BD',
-  Other: '\uD83D\uDCE6',
+  Books: '📚',
+  Electronics: '📱',
+  Clothing: '👕',
+  'Lab Equipment': '🥼',
+  Sports: '⚽',
+  Other: '📦',
 };
-
-let uidCounter = 1;
-function generateId() {
-  return `user_r_${Date.now()}_${uidCounter++}`;
-}
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function CreateNeedScreen() {
   const router = useRouter();
-  const { addRequest } = useMarketplace();
+  const { user } = useAuth();
 
   const [itemNeeded, setItemNeeded] = useState('');
   const [category, setCategory] = useState<Category>(null);
@@ -77,8 +65,9 @@ export default function CreateNeedScreen() {
   const [budget, setBudget] = useState('');
   const [duration, setDuration] = useState<Duration>(null);
   const [hostel, setHostel] = useState<Hostel>(null);
-  const [visibility, setVisibility] = useState<Visibility>(null);
+  const [selectedHostels, setSelectedHostels] = useState<string[]>([]); // [] = Everyone
   const [errors, setErrors] = useState<FormErrors>({});
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   // ── Validation ────────────────────────────────────────────────────────────
 
@@ -89,45 +78,86 @@ export default function CreateNeedScreen() {
     if (!description.trim()) newErrors.description = 'Description is required.';
     if (budget.trim() && isNaN(Number(budget))) newErrors.budget = 'Budget must be a valid number.';
     if (!hostel) newErrors.hostel = 'Please select your hostel.';
-    if (!visibility) newErrors.visibility = 'Please choose who can see this request.';
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
 
   // ── Submit ────────────────────────────────────────────────────────────────
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!validate()) return;
 
-    const budgetDisplay = budget.trim() ? `\u20B9${budget}` : 'Flexible';
+    if (!user?.id) {
+      Alert.alert(
+        'Authentication Required',
+        'You must be signed in to post a request.',
+        [{ text: 'OK' }]
+      );
+      return;
+    }
 
-    const newRequest: RequestItem = {
-      id: generateId(),
-      title: itemNeeded.trim(),
-      category: category as Exclude<ListingCategory, 'All'>,
-      urgency: 'Needed',
-      budget: budgetDisplay,
-      hostel: hostel as string,
-      description: description.trim(),
-      icon: CATEGORY_ICONS[category as string] ?? '\uD83D\uDCE6',
-      timeAgo: 'Just now',
-      requesterName: 'You',
-      requesterBranch: 'NIT Kurukshetra',
-    };
+    if (isSubmitting) return;
+    setIsSubmitting(true);
 
-    addRequest(newRequest);
+    try {
+      const numericBudget = budget.trim() ? Number(budget.trim()) : null;
+      const neededFor = duration || 'One-time use';
 
-    Alert.alert(
-      'Request Posted! \uD83D\uDD0D',
-      'Your request is live on the I NEED feed.',
-      [
-        {
-          text: 'View Feed',
-          style: 'default',
-          onPress: () => router.push('/(tabs)'),
-        },
-      ]
-    );
+      const { data, error } = await supabase
+        .from('requests')
+        .insert({
+          user_id: user.id,
+          title: itemNeeded.trim(),
+          category: category as string,
+          description: description.trim(),
+          budget: numericBudget,
+          needed_for: neededFor,
+          hostel: hostel as string,
+          visibility: selectedHostels.length === 0 ? 'Everyone' : selectedHostels.join(', '),
+          visibility_hostels: selectedHostels,
+          status: 'active',
+        })
+        .select('id')
+        .single();
+
+      if (error) {
+        console.error('[CreateNeed] Failed to insert request into Supabase:', {
+          message: error.message,
+          code: error.code,
+          details: error.details,
+          hint: error.hint,
+        });
+        Alert.alert(
+          'Post Failed',
+          error.message || 'Could not post your request. Please try again.'
+        );
+        return;
+      }
+
+      Alert.alert(
+        'Request Posted! 🔍',
+        'Your request is live on the I NEED feed.',
+        [
+          {
+            text: 'View Feed',
+            style: 'default',
+            onPress: () => router.push('/(tabs)'),
+          },
+        ]
+      );
+    } catch (err: any) {
+      console.error('[CreateNeed] Unexpected error during request submission:', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+      Alert.alert(
+        'Post Error',
+        err instanceof Error
+          ? err.message
+          : 'An unexpected error occurred while posting your request.'
+      );
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const clearError = (field: keyof FormErrors) => {
@@ -259,7 +289,7 @@ export default function CreateNeedScreen() {
           <View style={styles.fieldGroup}>
             <FieldLabel text="Your Hostel" required />
             <View style={styles.chipGrid}>
-              {HOSTELS.map((h) => {
+              {NIT_HOSTELS.map((h) => {
                 const selected = hostel === h;
                 return (
                   <TouchableOpacity key={h} style={[styles.chip, selected && styles.chipSelected]} onPress={() => { setHostel(h); clearError('hostel'); }} activeOpacity={0.75}>
@@ -274,21 +304,60 @@ export default function CreateNeedScreen() {
           {/* Visibility */}
           <View style={styles.fieldGroup}>
             <FieldLabel text="Visible to" required />
+            <Text style={{ fontSize: 12, color: '#64748B', marginBottom: 10 }}>
+              {selectedHostels.length === 0
+                ? 'Visible to everyone on campus'
+                : `Restricted to ${selectedHostels.length} hostel${selectedHostels.length > 1 ? 's' : ''}`}
+            </Text>
             <View style={styles.chipGrid}>
-              {VISIBILITY_OPTIONS.map((v) => {
-                const selected = visibility === v;
+              {/* Everyone option */}
+              <TouchableOpacity
+                key="Everyone"
+                style={[styles.chip, selectedHostels.length === 0 && styles.chipSelected]}
+                onPress={() => setSelectedHostels([])}
+                activeOpacity={0.75}
+              >
+                <Text style={[styles.chipText, selectedHostels.length === 0 && styles.chipTextSelected]}>🌐 Everyone</Text>
+              </TouchableOpacity>
+              {/* Hostels multi-select */}
+              {NIT_HOSTELS.map((h) => {
+                const isSelected = selectedHostels.includes(h);
                 return (
-                  <TouchableOpacity key={v} style={[styles.chip, selected && styles.chipSelected]} onPress={() => { setVisibility(v); clearError('visibility'); }} activeOpacity={0.75}>
-                    <Text style={[styles.chipText, selected && styles.chipTextSelected]}>{v}</Text>
+                  <TouchableOpacity
+                    key={h}
+                    style={[styles.chip, isSelected && styles.chipSelected]}
+                    onPress={() => {
+                      if (isSelected) {
+                        setSelectedHostels((prev) => prev.filter((item) => item !== h));
+                      } else {
+                        setSelectedHostels((prev) => [...prev, h]);
+                      }
+                    }}
+                    activeOpacity={0.75}
+                  >
+                    <Text style={[styles.chipText, isSelected && styles.chipTextSelected]}>
+                      {isSelected ? `✓ ${h}` : h}
+                    </Text>
                   </TouchableOpacity>
                 );
               })}
             </View>
-            {errors.visibility && <ErrorText text={errors.visibility} />}
           </View>
 
-          <TouchableOpacity style={styles.submitButton} onPress={handleSubmit} activeOpacity={0.85}>
-            <Text style={styles.submitButtonText}>📢  Post Request</Text>
+          <TouchableOpacity
+            style={[styles.submitButton, isSubmitting && styles.buttonDisabled]}
+            onPress={handleSubmit}
+            disabled={isSubmitting}
+            activeOpacity={0.85}
+          >
+            {isSubmitting ? (
+              <View style={styles.buttonContent}>
+                <ActivityIndicator color="#FFFFFF" size="small" />
+                <Text style={styles.submitButtonText}>Posting Request...</Text>
+              </View>
+            ) : (
+              <Text style={styles.submitButtonText}>📢  Post Request</Text>
+            )}
           </TouchableOpacity>
 
           <View style={{ height: 32 }} />
@@ -354,4 +423,6 @@ const styles = StyleSheet.create({
   errorText: { fontSize: 12, color: Colors.light.error, marginTop: 6, fontWeight: '500' },
   submitButton: { marginHorizontal: Spacing.md, marginTop: 24, backgroundColor: '#D97706', paddingVertical: 16, borderRadius: BorderRadius.md, alignItems: 'center', justifyContent: 'center', shadowColor: '#D97706', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.35, shadowRadius: 10, elevation: 5 },
   submitButtonText: { fontSize: 16, fontWeight: '800', color: '#FFFFFF', letterSpacing: 0.3 },
+  buttonDisabled: { opacity: 0.65 },
+  buttonContent: { flexDirection: 'row', alignItems: 'center', gap: 8 },
 });
