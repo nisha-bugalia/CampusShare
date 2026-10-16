@@ -9,7 +9,11 @@
       "distribution": "internal"
     },
     "preview": {
-      "distribution": "internal"
+      "distribution": "internal",
+      "env": {
+        "EXPO_PUBLIC_SUPABASE_URL": "https://mvetatzmttqwdjerigip.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY": "sb_publishable_drF0kuI7uTCZc9sUkV9NEg_CSUnTtLw"
+      }
     },
     "production": {
       "autoIncrement": true

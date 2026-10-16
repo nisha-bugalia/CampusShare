@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   StyleSheet,
   Text,
@@ -17,6 +17,8 @@ import { Colors } from '../../src/constants/colors';
 import { Spacing, BorderRadius } from '../../src/constants/layout';
 import { ListingCategory } from '../../src/types/listing';
 import { useAuth } from '../../src/context/AuthContext';
+import { useProfile } from '../../src/hooks/useProfile';
+import { useMarketplace } from '../../src/context/MarketplaceContext';
 import { supabase } from '../../src/lib/supabase';
 import { NIT_HOSTELS, NITHostel } from '../../src/constants/campus';
 
@@ -58,6 +60,8 @@ const CATEGORY_ICONS: Record<string, string> = {
 export default function CreateNeedScreen() {
   const router = useRouter();
   const { user } = useAuth();
+  const { profile } = useProfile();
+  const { refresh: refreshMarketplace } = useMarketplace();
 
   const [itemNeeded, setItemNeeded] = useState('');
   const [category, setCategory] = useState<Category>(null);
@@ -68,6 +72,13 @@ export default function CreateNeedScreen() {
   const [selectedHostels, setSelectedHostels] = useState<string[]>([]); // [] = Everyone
   const [errors, setErrors] = useState<FormErrors>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Prefill hostel with user's saved profile hostel if not yet set
+  useEffect(() => {
+    if (profile?.hostel && !hostel) {
+      setHostel(profile.hostel as Hostel);
+    }
+  }, [profile?.hostel]);
 
   // ── Validation ────────────────────────────────────────────────────────────
 
@@ -132,6 +143,12 @@ export default function CreateNeedScreen() {
           error.message || 'Could not post your request. Please try again.'
         );
         return;
+      }
+
+      try {
+        await refreshMarketplace();
+      } catch (refreshErr) {
+        console.warn('[CreateNeed] Failed to refresh feed after post:', refreshErr);
       }
 
       Alert.alert(

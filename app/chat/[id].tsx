@@ -31,6 +31,9 @@ import {
   clearActiveChatPresence,
   ConversationDetails,
 } from '../../src/services/chatService';
+import { blockUser, unblockUser, checkBlockStatus } from '../../src/services/safetyService';
+import { BlockStatus } from '../../src/types/safety';
+import ReportModal from '../../src/components/ReportModal';
 
 function formatMessageTime(isoString: string): string {
   try {
@@ -58,6 +61,14 @@ export default function ChatScreen() {
   const [keyboardHeight, setKeyboardHeight] = useState<number>(0);
 
   const flatListRef = useRef<FlatList<DbMessage>>(null);
+
+  // Safety state
+  const [blockStatus, setBlockStatus] = useState<BlockStatus>({
+    isBlocked: false,
+    isBlockedBy: false,
+    isBidirectional: false,
+  });
+  const [reportModalVisible, setReportModalVisible] = useState(false);
 
   // ── Keyboard Listener (Rock-solid Android & iOS positioning) ──
   useEffect(() => {
@@ -135,6 +146,94 @@ export default function ChatScreen() {
       deactivate();
     };
   }, [id, user?.id]);
+
+  // ── Block Status Check ──
+  useEffect(() => {
+    if (!convoDetails?.otherUser?.id || !user?.id) return;
+    checkBlockStatus(convoDetails.otherUser.id).then((status) => {
+      setBlockStatus(status);
+    });
+  }, [convoDetails?.otherUser?.id, user?.id]);
+
+  const handleConfirmUnblock = () => {
+    if (!convoDetails?.otherUser) return;
+    const otherUser = convoDetails.otherUser;
+    Alert.alert(
+      `Unblock ${otherUser.name}?`,
+      'You will be able to message each other and view their listings again.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Unblock',
+          style: 'default',
+          onPress: async () => {
+            try {
+              await unblockUser(otherUser.id);
+              setBlockStatus((prev) => ({
+                isBlocked: false,
+                isBlockedBy: prev.isBlockedBy,
+                isBidirectional: prev.isBlockedBy,
+              }));
+              Alert.alert('User Unblocked', `${otherUser.name} has been unblocked.`);
+            } catch (e: any) {
+              Alert.alert('Error', e?.message ?? 'Failed to unblock.');
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const handleConfirmBlock = () => {
+    if (!convoDetails?.otherUser) return;
+    const otherUser = convoDetails.otherUser;
+    Alert.alert(
+      `Block ${otherUser.name}?`,
+      'Neither of you will be able to message each other, and you will not see their listings on CampusShare.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Block',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await blockUser(otherUser.id);
+              setBlockStatus((prev) => ({
+                ...prev,
+                isBlocked: true,
+                isBidirectional: true,
+              }));
+              Alert.alert('User Blocked', `${otherUser.name} has been blocked.`);
+            } catch (e: any) {
+              Alert.alert('Error', e?.message ?? 'Failed to block.');
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const handleOpenSafetyMenu = () => {
+    if (!convoDetails?.otherUser) return;
+    const otherUser = convoDetails.otherUser;
+    Alert.alert('Safety Options', 'Report or manage this conversation', [
+      {
+        text: `Report ${otherUser.name}`,
+        onPress: () => setReportModalVisible(true),
+      },
+      blockStatus.isBlocked
+        ? {
+            text: `Unblock ${otherUser.name}`,
+            onPress: handleConfirmUnblock,
+          }
+        : {
+            text: `Block ${otherUser.name}`,
+            style: 'destructive' as const,
+            onPress: handleConfirmBlock,
+          },
+      { text: 'Cancel', style: 'cancel' as const },
+    ]);
+  };
 
   // ── 1. Fetch initial data + Realtime subscription ──
   useEffect(() => {
@@ -315,6 +414,17 @@ export default function ChatScreen() {
               )}
             </View>
           ),
+          headerRight: convoDetails?.otherUser
+            ? () => (
+                <TouchableOpacity
+                  onPress={handleOpenSafetyMenu}
+                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                  style={{ paddingHorizontal: 12 }}
+                >
+                  <Text style={{ fontSize: 22, fontWeight: '700', color: '#0F172A' }}>⋮</Text>
+                </TouchableOpacity>
+              )
+            : undefined,
         }}
       />
 
@@ -329,6 +439,28 @@ export default function ChatScreen() {
             Platform.OS === 'android' && { paddingBottom: keyboardHeight },
           ]}
         >
+          {/* Blocked user banner */}
+          {blockStatus.isBidirectional && (
+            <View style={styles.blockedBanner}>
+              <View style={styles.blockedBannerContent}>
+                <Text style={styles.blockedBannerText}>
+                  {blockStatus.isBlocked
+                    ? '🚫 You have blocked this user.'
+                    : '🚫 You cannot message this user due to campus safety and blocking policies.'}
+                </Text>
+                {blockStatus.isBlocked && (
+                  <TouchableOpacity
+                    style={styles.unblockBannerButton}
+                    onPress={handleConfirmUnblock}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={styles.unblockBannerButtonText}>Unblock</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            </View>
+          )}
+
           {isLoading ? (
             <View style={styles.centerContainer}>
               <ActivityIndicator size="large" color={Colors.light.primary} />
@@ -387,37 +519,69 @@ export default function ChatScreen() {
               },
             ]}
           >
-            <View style={styles.inputContainer}>
-              <TextInput
-                style={styles.textInput}
-                placeholder="Type a message..."
-                placeholderTextColor="#94A3B8"
-                value={inputText}
-                onChangeText={setInputText}
-                multiline
-                maxLength={1000}
-                editable={!isLoading && !errorMessage}
-              />
-              <TouchableOpacity
-                style={[
-                  styles.sendButton,
-                  (!inputText.trim() || isSending || isLoading || !!errorMessage) &&
-                    styles.sendButtonDisabled,
-                ]}
-                onPress={handleSend}
-                disabled={!inputText.trim() || isSending || isLoading || !!errorMessage}
-                activeOpacity={0.8}
-              >
-                {isSending ? (
-                  <ActivityIndicator size="small" color="#FFFFFF" />
-                ) : (
-                  <Text style={styles.sendIcon}>➤</Text>
-                )}
-              </TouchableOpacity>
-            </View>
+            {blockStatus.isBlocked ? (
+              <View style={styles.blockedComposer}>
+                <Text style={styles.blockedComposerText} numberOfLines={2}>
+                  You blocked this user.
+                </Text>
+                <TouchableOpacity
+                  style={styles.unblockComposerButton}
+                  onPress={handleConfirmUnblock}
+                  activeOpacity={0.8}
+                >
+                  <Text style={styles.unblockComposerButtonText}>Unblock to Chat</Text>
+                </TouchableOpacity>
+              </View>
+            ) : blockStatus.isBlockedBy ? (
+              <View style={styles.blockedComposer}>
+                <Text style={styles.blockedComposerText}>
+                  You cannot message this user due to campus safety policies.
+                </Text>
+              </View>
+            ) : (
+              <View style={styles.inputContainer}>
+                <TextInput
+                  style={styles.textInput}
+                  placeholder="Type a message..."
+                  placeholderTextColor="#94A3B8"
+                  value={inputText}
+                  onChangeText={setInputText}
+                  multiline
+                  maxLength={1000}
+                  editable={!isLoading && !errorMessage}
+                />
+                <TouchableOpacity
+                  style={[
+                    styles.sendButton,
+                    (!inputText.trim() || isSending || isLoading || !!errorMessage) &&
+                      styles.sendButtonDisabled,
+                  ]}
+                  onPress={handleSend}
+                  disabled={!inputText.trim() || isSending || isLoading || !!errorMessage}
+                  activeOpacity={0.8}
+                >
+                  {isSending ? (
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  ) : (
+                    <Text style={styles.sendIcon}>➤</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+            )}
           </View>
         </View>
       </KeyboardAvoidingView>
+
+      {/* Safety Report Modal */}
+      {convoDetails?.otherUser && (
+        <ReportModal
+          visible={reportModalVisible}
+          onClose={() => setReportModalVisible(false)}
+          targetType="user"
+          targetId={convoDetails.otherUser.id}
+          targetLabel={convoDetails.otherUser.name}
+        />
+      )}
     </View>
   );
 }
@@ -624,5 +788,72 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: 'bold',
     marginLeft: 2,
+  },
+
+  // Blocked banner
+  blockedBanner: {
+    backgroundColor: '#FEF2F2',
+    borderBottomWidth: 1,
+    borderBottomColor: '#FECACA',
+    paddingHorizontal: Spacing.md,
+    paddingVertical: 10,
+  },
+  blockedBannerContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  blockedBannerText: {
+    fontSize: 13,
+    color: '#DC2626',
+    textAlign: 'center',
+    fontWeight: '500',
+    lineHeight: 18,
+  },
+  unblockBannerButton: {
+    backgroundColor: '#DC2626',
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: BorderRadius.full,
+  },
+  unblockBannerButtonText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+
+  // Blocked composer
+  blockedComposer: {
+    backgroundColor: '#F1F5F9',
+    borderRadius: BorderRadius.lg,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    width: '100%',
+  },
+  blockedComposerText: {
+    color: '#64748B',
+    fontSize: 13,
+    fontWeight: '500',
+    flex: 1,
+    lineHeight: 18,
+  },
+  unblockComposerButton: {
+    backgroundColor: Colors.light.primary,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: BorderRadius.full,
+    marginLeft: 8,
+  },
+  unblockComposerButtonText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '700',
   },
 });

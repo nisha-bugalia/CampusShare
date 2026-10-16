@@ -18,6 +18,7 @@ import {
   fetchConversations,
   ConversationListItem,
 } from '../../src/services/chatService';
+import { supabase } from '../../src/lib/supabase';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -64,10 +65,11 @@ function avatarColor(name: string): string {
 interface ConversationCardProps {
   item: ConversationListItem;
   currentUserId: string;
+  isBlocked?: boolean;
   onPress: () => void;
 }
 
-function ConversationCard({ item, currentUserId, onPress }: ConversationCardProps) {
+function ConversationCard({ item, currentUserId, isBlocked, onPress }: ConversationCardProps) {
   const { otherUser, subjectTitle, latestMessageText, latestMessageSenderId, latestActivityAt, lastReadAt } = item;
   const initials = getInitials(otherUser.name);
   const bgColor = avatarColor(otherUser.name);
@@ -95,9 +97,16 @@ function ConversationCard({ item, currentUserId, onPress }: ConversationCardProp
       </View>
       <View style={styles.cardBody}>
         <View style={styles.cardTopRow}>
-          <Text style={[styles.nameText, isUnread && styles.nameTextUnread]} numberOfLines={1}>
-            {otherUser.name}
-          </Text>
+          <View style={styles.nameContainer}>
+            <Text style={[styles.nameText, isUnread && styles.nameTextUnread]} numberOfLines={1}>
+              {otherUser.name}
+            </Text>
+            {isBlocked && (
+              <View style={styles.blockedTag}>
+                <Text style={styles.blockedTagText}>Blocked</Text>
+              </View>
+            )}
+          </View>
           <View style={styles.timeRow}>
             {isUnread && <View style={styles.unreadDot} />}
             <Text style={[styles.timeText, isUnread && styles.timeTextUnread]}>{timeLabel}</Text>
@@ -128,6 +137,7 @@ export default function MessagesScreen() {
   const router = useRouter();
 
   const [conversations, setConversations] = useState<ConversationListItem[]>([]);
+  const [blockedUserIds, setBlockedUserIds] = useState<Set<string>>(new Set());
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -140,13 +150,30 @@ export default function MessagesScreen() {
       }
       if (!silent) setIsLoading(true);
       setErrorMessage(null);
-      const { data, error } = await fetchConversations(user.id);
-      if (error) {
-        console.error('[MessagesScreen] Error fetching conversations:', error);
+      const [convoRes, blocksRes] = await Promise.all([
+        fetchConversations(user.id),
+        supabase
+          .from('blocks')
+          .select('blocker_id, blocked_id')
+          .or(`blocker_id.eq.${user.id},blocked_id.eq.${user.id}`),
+      ]);
+
+      if (convoRes.error) {
+        console.error('[MessagesScreen] Error fetching conversations:', convoRes.error);
         setErrorMessage('Could not load your conversations. Pull down to retry.');
       } else {
-        setConversations(data ?? []);
+        setConversations(convoRes.data ?? []);
       }
+
+      const blockedSet = new Set<string>();
+      if (blocksRes.data) {
+        blocksRes.data.forEach((r: any) => {
+          if (r.blocker_id === user.id) blockedSet.add(r.blocked_id);
+          if (r.blocked_id === user.id) blockedSet.add(r.blocker_id);
+        });
+      }
+      setBlockedUserIds(blockedSet);
+
       setIsLoading(false);
       setIsRefreshing(false);
     },
@@ -178,6 +205,7 @@ export default function MessagesScreen() {
     <ConversationCard
       item={item}
       currentUserId={user?.id ?? ''}
+      isBlocked={blockedUserIds.has(item.otherUser.id)}
       onPress={() => handleOpenConversation(item.id)}
     />
   );
@@ -338,12 +366,32 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
   },
-  nameText: {
+  nameContainer: {
     flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginRight: Spacing.sm,
+  },
+  nameText: {
+    flexShrink: 1,
     fontSize: 16,
     fontWeight: '600',
     color: Colors.light.text,
-    marginRight: Spacing.sm,
+  },
+  blockedTag: {
+    backgroundColor: '#FEE2E2',
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderRadius: 4,
+    borderWidth: 1,
+    borderColor: '#FECACA',
+  },
+  blockedTagText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#DC2626',
+    letterSpacing: 0.2,
   },
   nameTextUnread: {
     fontWeight: '800',

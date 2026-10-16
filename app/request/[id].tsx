@@ -9,6 +9,7 @@ import {
   SafeAreaView,
   ActivityIndicator,
   Image,
+  Modal,
 } from 'react-native';
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
 import { useMarketplace } from '../../src/context/MarketplaceContext';
@@ -23,6 +24,9 @@ import {
   formatBudget,
   getCategoryIcon,
 } from '../../src/utils/adapters';
+import { blockUser, unblockUser, checkBlockStatus } from '../../src/services/safetyService';
+import { BlockStatus } from '../../src/types/safety';
+import ReportModal from '../../src/components/ReportModal';
 
 export default function RequestDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -35,6 +39,24 @@ export default function RequestDetailScreen() {
   const [dbRequest, setDbRequest] = useState<RequestItem | null>(null);
   const [isLoadingDb, setIsLoadingDb] = useState<boolean>(!localRequest && !!id);
   const [isStartingChat, setIsStartingChat] = useState<boolean>(false);
+
+  // Safety state
+  const [blockStatus, setBlockStatus] = useState<BlockStatus>({
+    isBlocked: false,
+    isBlockedBy: false,
+    isBidirectional: false,
+  });
+  const [reportModalConfig, setReportModalConfig] = useState<{
+    visible: boolean;
+    targetType: 'request' | 'user';
+    targetId: string;
+    targetLabel?: string;
+  }>({
+    visible: false,
+    targetType: 'request',
+    targetId: '',
+  });
+  const [safetyMenuVisible, setSafetyMenuVisible] = useState(false);
 
   useEffect(() => {
     if (!id) {
@@ -110,6 +132,8 @@ export default function RequestDetailScreen() {
             requesterProfile?.avatar_url || localRequest?.requesterAvatarUrl || null,
           requesterVerified:
             requesterProfile?.verified ?? localRequest?.requesterVerified ?? false,
+          visibilityHostels: data.visibility_hostels ?? [],
+          visibility: data.visibility,
         };
 
         if (isMounted) {
@@ -133,6 +157,73 @@ export default function RequestDetailScreen() {
   }, [id]);
 
   const request = dbRequest || localRequest;
+
+  // Block status check
+  useEffect(() => {
+    if (request?.user_id && user?.id && request.user_id !== user.id) {
+      checkBlockStatus(request.user_id).then((status) => {
+        setBlockStatus(status);
+      });
+    }
+  }, [request?.user_id, user?.id]);
+
+  const confirmBlockRequester = (requesterId: string, requesterName: string) => {
+    Alert.alert(
+      `Block ${requesterName}?`,
+      'Neither of you will be able to message each other, and you will not see their posts on CampusShare.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Block',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await blockUser(requesterId);
+              setBlockStatus((prev) => ({
+                ...prev,
+                isBlocked: true,
+                isBidirectional: true,
+              }));
+              Alert.alert('User Blocked', `${requesterName} has been blocked.`);
+            } catch (e: any) {
+              Alert.alert('Block Error', e?.message ?? 'Failed to block user.');
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const confirmUnblockRequester = (requesterId: string, requesterName: string) => {
+    Alert.alert(
+      `Unblock ${requesterName}?`,
+      'You will be able to message each other and view their posts again.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Unblock',
+          onPress: async () => {
+            try {
+              await unblockUser(requesterId);
+              setBlockStatus((prev) => ({
+                isBlocked: false,
+                isBlockedBy: prev.isBlockedBy,
+                isBidirectional: prev.isBlockedBy,
+              }));
+              Alert.alert('Unblocked', `${requesterName} has been unblocked.`);
+            } catch (e: any) {
+              Alert.alert('Unblock Error', e?.message ?? 'Failed to unblock.');
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const handleOpenSafetyMenu = () => {
+    if (!request || request.user_id === user?.id) return;
+    setSafetyMenuVisible(true);
+  };
 
   if (isLoadingDb) {
     return (
@@ -229,9 +320,21 @@ export default function RequestDetailScreen() {
     <SafeAreaView style={styles.screen}>
       <Stack.Screen
         options={{
+          headerShown: true,
           title: 'Request Detail',
           headerBackTitle: 'Back',
-          headerTitleStyle: { fontSize: 15 },
+          headerTitleStyle: { fontSize: 16, fontWeight: '700' },
+          headerTintColor: '#0F172A',
+          headerRight: () =>
+            request && request.user_id !== user?.id ? (
+              <TouchableOpacity
+                onPress={handleOpenSafetyMenu}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                style={{ paddingHorizontal: 12 }}
+              >
+                <Text style={{ fontSize: 22, fontWeight: '700', color: '#0F172A' }}>⋮</Text>
+              </TouchableOpacity>
+            ) : null,
         }}
       />
 
@@ -284,7 +387,17 @@ export default function RequestDetailScreen() {
 
         {/* Requester Info */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Requested by</Text>
+          <View style={styles.sectionHeaderRow}>
+            <Text style={styles.sectionTitle}>Requested by</Text>
+            {request && request.user_id !== user?.id && (
+              <TouchableOpacity
+                onPress={handleOpenSafetyMenu}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <Text style={styles.reportLink}>Report / Safety</Text>
+              </TouchableOpacity>
+            )}
+          </View>
           <View style={styles.requesterCard}>
             {request.requesterAvatarUrl ? (
               <Image
@@ -321,18 +434,33 @@ export default function RequestDetailScreen() {
       {/* Sticky Bottom Bar */}
       <View style={styles.bottomBar}>
         <TouchableOpacity
-          style={[styles.actionButton, styles.chatButton, isStartingChat && { opacity: 0.7 }]}
+          style={[
+            styles.actionButton,
+            styles.chatButton,
+            (isStartingChat || blockStatus.isBidirectional) && { opacity: 0.6 },
+          ]}
           activeOpacity={0.8}
           onPress={handleChat}
-          disabled={isStartingChat}
+          disabled={isStartingChat || blockStatus.isBidirectional}
         >
           {isStartingChat ? (
             <ActivityIndicator size="small" color="#FFFFFF" />
           ) : (
-            <Text style={styles.chatButtonText}>💬  Chat with Requester</Text>
+            <Text style={styles.chatButtonText}>
+              {blockStatus.isBidirectional ? '🚫  Requester is Blocked' : '💬  Chat with Requester'}
+            </Text>
           )}
         </TouchableOpacity>
       </View>
+
+      {/* Safety Report Modal */}
+      <ReportModal
+        visible={reportModalConfig.visible}
+        onClose={() => setReportModalConfig((prev) => ({ ...prev, visible: false }))}
+        targetType={reportModalConfig.targetType}
+        targetId={reportModalConfig.targetId}
+        targetLabel={reportModalConfig.targetLabel}
+      />
     </SafeAreaView>
   );
 }
@@ -615,5 +743,16 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '700',
     color: '#FFFFFF',
+  },
+  sectionHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: Spacing.sm,
+  },
+  reportLink: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: Colors.light.error,
   },
 });

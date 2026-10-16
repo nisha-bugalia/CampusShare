@@ -42,6 +42,17 @@ function notify() {
 }
 
 /**
+ * Subscribes an external listener to profile updates.
+ * Returns an unsubscribe callback.
+ */
+export function subscribeProfile(listener: () => void): () => void {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
+}
+
+/**
  * useProfile
  *
  * Fetches and manages the current authenticated user's profile
@@ -182,7 +193,7 @@ export function useProfile(): UseProfileResult {
       if (!user?.id) return 'Not authenticated.';
 
       try {
-        // 1. Try to update existing profile row first
+        // 1. Target only the authenticated user's public.profiles row
         const { data: updatedRows, error: updateError } = await supabase
           .from('profiles')
           .update(updates)
@@ -194,43 +205,79 @@ export function useProfile(): UseProfileResult {
           return updateError.message;
         }
 
-        if (updatedRows && updatedRows.length > 0) {
-          cachedProfile = updatedRows[0] as Profile;
-          cachedError = null;
-          notify();
-          return null;
+        // 2. If 0 rows updated, verify whether row exists before deciding whether to upsert
+        if (!updatedRows || updatedRows.length === 0) {
+          const { data: existingRow, error: checkError } = await supabase
+            .from('profiles')
+            .select('id')
+            .eq('id', user.id)
+            .maybeSingle();
+
+          if (checkError) {
+            console.warn('[useProfile] profile check error:', checkError.message);
+            return checkError.message;
+          }
+
+          if (!existingRow) {
+            // Profile row did not exist yet; insert a base row with updates
+            const fullProfile = {
+              id: user.id,
+              name:
+                (user.user_metadata?.full_name as string) ||
+                (user.user_metadata?.name as string) ||
+                (user.email ? user.email.split('@')[0] : 'NIT Kurukshetra Student'),
+              email: user.email || null,
+              avatar_url:
+                (user.user_metadata?.avatar_url as string) ||
+                (user.user_metadata?.picture as string) ||
+                null,
+              branch: updates.branch || null,
+              hostel: updates.hostel || null,
+              verified: true,
+              ...updates,
+            };
+
+            const { error: upsertError } = await supabase
+              .from('profiles')
+              .upsert(fullProfile, { onConflict: 'id' });
+
+            if (upsertError) {
+              console.warn('[useProfile] upsert profile error:', upsertError.message);
+              return upsertError.message;
+            }
+          } else {
+            // Row exists in DB, but 0 rows were updated -> RLS prevented update or invalid state
+            console.warn('[useProfile] 0 rows updated for existing profile row id:', user.id);
+            return 'Failed to update profile: zero rows affected.';
+          }
         }
 
-        // 2. If 0 rows updated, profile row does not exist yet; try upsert
-        const fullProfile = {
-          id: user.id,
-          name:
-            (user.user_metadata?.full_name as string) ||
-            (user.user_metadata?.name as string) ||
-            (user.email ? user.email.split('@')[0] : 'NIT Kurukshetra Student'),
-          email: user.email || null,
-          avatar_url:
-            (user.user_metadata?.avatar_url as string) ||
-            (user.user_metadata?.picture as string) ||
-            null,
-          branch: updates.branch || null,
-          hostel: updates.hostel || null,
-          verified: true,
-          ...updates,
-        };
-
-        const { data: upserted, error: upsertError } = await supabase
+        // 3. Explicitly verify the persisted data from Supabase before reporting success
+        const { data: verified, error: verifyError } = await supabase
           .from('profiles')
-          .upsert(fullProfile)
           .select('*')
-          .single();
+          .eq('id', user.id)
+          .maybeSingle();
 
-        if (upsertError) {
-          console.warn('[useProfile] upsert profile error:', upsertError.message);
-          return upsertError.message;
+        if (verifyError || !verified) {
+          const msg = verifyError?.message || 'Profile verification failed: profile record not found.';
+          console.warn('[useProfile] verification error:', msg);
+          return msg;
         }
 
-        cachedProfile = upserted as Profile;
+        // Confirm requested updates were actually persisted in the database row
+        if (updates.name !== undefined && verified.name !== updates.name) {
+          return 'Profile verification failed: name was not persisted in database.';
+        }
+        if (updates.branch !== undefined && verified.branch !== updates.branch) {
+          return 'Profile verification failed: branch was not persisted in database.';
+        }
+        if (updates.hostel !== undefined && verified.hostel !== updates.hostel) {
+          return 'Profile verification failed: hostel was not persisted in database.';
+        }
+
+        // 4. Update the shared profile cache and notify all hook instances
+        cachedProfile = verified as Profile;
         cachedError = null;
         notify();
         return null;

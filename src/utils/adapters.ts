@@ -98,6 +98,7 @@ export function dbListingToListing(db: DbListingWithOwner): Listing {
     ownerAvatarUrl: owner?.avatar_url ?? null,
     ownerVerified: owner?.verified ?? false,
     visibilityHostels: db.visibility_hostels ?? [],
+    visibility: db.visibility,
   };
 }
 
@@ -124,5 +125,6 @@ export function dbRequestToRequestItem(db: DbRequestWithOwner): RequestItem {
     requesterAvatarUrl: requester?.avatar_url ?? null,
     requesterVerified: requester?.verified ?? false,
     visibilityHostels: db.visibility_hostels ?? [],
+    visibility: db.visibility,
   };
 }

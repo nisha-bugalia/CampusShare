@@ -30,6 +30,8 @@ export interface Listing {
   ownerVerified?: boolean;
   /** Allowed hostels for visibility ([] = Everyone) */
   visibilityHostels?: string[];
+  /** Visibility scope label (e.g., 'Everyone', 'My Hostel') */
+  visibility?: string;
 }
 
 export interface RequestItem {
@@ -51,4 +53,6 @@ export interface RequestItem {
   requesterVerified?: boolean;
   /** Allowed hostels for visibility ([] = Everyone) */
   visibilityHostels?: string[];
+  /** Visibility scope label (e.g., 'Everyone', 'My Hostel') */
+  visibility?: string;
 }

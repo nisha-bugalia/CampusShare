@@ -18,12 +18,14 @@ import { Colors } from '../src/constants/colors';
 import { Spacing, BorderRadius } from '../src/constants/layout';
 import { useAuth } from '../src/context/AuthContext';
 import { useProfile } from '../src/hooks/useProfile';
+import { useMarketplace } from '../src/context/MarketplaceContext';
 import { NIT_BRANCHES, NIT_HOSTELS } from '../src/constants/campus';
 
 export default function OnboardingScreen() {
   const router = useRouter();
   const { user, signOut } = useAuth();
   const { profile, updateProfile, isLoading: isProfileLoading, error: profileError } = useProfile();
+  const { refresh: refreshMarketplace } = useMarketplace();
 
   const [selectedBranch, setSelectedBranch] = useState<string>(
     profile?.branch || ''
@@ -87,7 +89,12 @@ export default function OnboardingScreen() {
         return;
       }
 
-      // Successfully saved profile row -> navigate to main app home tabs
+      // Successfully saved profile row -> refresh feed and navigate to main app home tabs
+      try {
+        await refreshMarketplace();
+      } catch (e) {
+        console.warn('[Onboarding] Error refreshing marketplace feed:', e);
+      }
       setIsSubmitting(false);
       router.replace('/(tabs)');
     } catch (err: any) {

@@ -307,13 +307,44 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    // ── 6. Active-presence check ──────────────────────────────────
-    // Skip recipients who are currently viewing this conversation.
-    const recipientsToNotify: string[] = [];
+    // ── 6. Block relationship check ──────────────────────────────
+    // Skip recipients if there is an active block in either direction.
+    const unblockedRecipients: string[] = [];
 
     for (const member of recipientMembers) {
       const recipientId: string = member.user_id;
 
+      const { data: blockRow } = await supabaseAdmin
+        .from('blocks')
+        .select('id')
+        .or(`and(blocker_id.eq.${senderId},blocked_id.eq.${recipientId}),and(blocker_id.eq.${recipientId},blocked_id.eq.${senderId})`)
+        .maybeSingle();
+
+      if (blockRow) {
+        console.log(
+          `[notify-chat-message] Skipping ${recipientId}: active block relationship between sender ${senderId} and recipient ${recipientId}.`
+        );
+      } else {
+        unblockedRecipients.push(recipientId);
+      }
+    }
+
+    if (unblockedRecipients.length === 0) {
+      return new Response(
+        JSON.stringify({
+          success: true,
+          skipped: true,
+          reason:  'All recipient(s) have an active block relationship with sender.',
+        }),
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    // ── 7. Active-presence check ──────────────────────────────────
+    // Skip recipients who are currently viewing this conversation.
+    const inactiveRecipients: string[] = [];
+
+    for (const recipientId of unblockedRecipients) {
       const { data: isActive, error: rpcError } = await supabaseAdmin.rpc(
         'is_member_active_in_conversation',
         {
@@ -352,11 +383,11 @@ Deno.serve(async (req: Request) => {
           `[notify-chat-message] Skipping ${recipientId}: active in conversation ${conversationId}.`
         );
       } else {
-        recipientsToNotify.push(recipientId);
+        inactiveRecipients.push(recipientId);
       }
     }
 
-    if (recipientsToNotify.length === 0) {
+    if (inactiveRecipients.length === 0) {
       return new Response(
         JSON.stringify({
           success: true,
@@ -367,7 +398,41 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    // ── 7. Fetch push tokens for inactive recipients ───────────────
+    // ── 8. Check recipient chat notification preferences ─────────
+    // Skip recipients who have disabled chat notifications in settings.
+    const recipientsToNotify: string[] = [];
+
+    for (const recipientId of inactiveRecipients) {
+      const { data: prefRow } = await supabaseAdmin
+        .from('notification_preferences')
+        .select('chat_notifications')
+        .eq('user_id', recipientId)
+        .maybeSingle();
+
+      // Default is enabled (true) unless explicitly set to false
+      const chatNotificationsEnabled = prefRow ? prefRow.chat_notifications !== false : true;
+
+      if (!chatNotificationsEnabled) {
+        console.log(
+          `[notify-chat-message] Skipping ${recipientId}: chat notifications disabled by user preference.`
+        );
+      } else {
+        recipientsToNotify.push(recipientId);
+      }
+    }
+
+    if (recipientsToNotify.length === 0) {
+      return new Response(
+        JSON.stringify({
+          success: true,
+          skipped: true,
+          reason:  'All recipient(s) have chat notifications disabled in settings.',
+        }),
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    // ── 9. Fetch push tokens for eligible recipients ──────────────
     const { data: pushTokens, error: tokensError } = await supabaseAdmin
       .from('push_tokens')
       .select('expo_push_token, platform, user_id')

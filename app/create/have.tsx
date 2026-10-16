@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   StyleSheet,
   Text,
@@ -20,6 +20,8 @@ import { Colors } from '../../src/constants/colors';
 import { Spacing, BorderRadius } from '../../src/constants/layout';
 import { ListingCategory, ItemMode } from '../../src/types/listing';
 import { useAuth } from '../../src/context/AuthContext';
+import { useProfile } from '../../src/hooks/useProfile';
+import { useMarketplace } from '../../src/context/MarketplaceContext';
 import { supabase } from '../../src/lib/supabase';
 
 import { NIT_HOSTELS, NITHostel } from '../../src/constants/campus';
@@ -57,6 +59,8 @@ const CATEGORIES: Exclude<ListingCategory, 'All'>[] = [
 export default function CreateHaveScreen() {
   const router = useRouter();
   const { user } = useAuth();
+  const { profile } = useProfile();
+  const { refresh: refreshMarketplace } = useMarketplace();
 
   const [itemName, setItemName] = useState('');
   const [category, setCategory] = useState<Category>(null);
@@ -69,6 +73,13 @@ export default function CreateHaveScreen() {
   const [errors, setErrors] = useState<FormErrors>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
+
+  // Prefill hostel with user's saved profile hostel if not yet set
+  useEffect(() => {
+    if (profile?.hostel && !hostel) {
+      setHostel(profile.hostel as Hostel);
+    }
+  }, [profile?.hostel]);
 
   // ─── Photo Actions ──────────────────────────────────────────────────────────
 
@@ -304,6 +315,12 @@ export default function CreateHaveScreen() {
           'Failed to retrieve the new listing ID from the database.'
         );
         return;
+      }
+
+      try {
+        await refreshMarketplace();
+      } catch (refreshErr) {
+        console.warn('[CreateHave] Failed to refresh feed after post:', refreshErr);
       }
 
       Alert.alert(

@@ -96,6 +96,13 @@ function RootNavigator() {
       <Stack.Screen name="edit/have" options={{ headerShown: false }} />
       <Stack.Screen name="edit/need" options={{ headerShown: false }} />
       <Stack.Screen name="chat/[id]" options={{ headerShown: false }} />
+      <Stack.Screen name="blocked-users" options={{ headerShown: false }} />
+      <Stack.Screen name="profile/edit" options={{ headerShown: false }} />
+      <Stack.Screen name="settings/index" options={{ headerShown: false }} />
+      <Stack.Screen name="settings/notifications" options={{ headerShown: false }} />
+      <Stack.Screen name="settings/privacy" options={{ headerShown: false }} />
+      <Stack.Screen name="settings/help" options={{ headerShown: false }} />
+      <Stack.Screen name="settings/about" options={{ headerShown: false }} />
       <Stack.Screen
         name="+not-found"
         options={{

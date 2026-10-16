@@ -8,9 +8,11 @@ import {
   ScrollView,
   FlatList,
 } from 'react-native';
+import { useFocusEffect } from 'expo-router';
 import { Colors } from '../../src/constants/colors';
 import { Spacing, BorderRadius } from '../../src/constants/layout';
 import { Listing, RequestItem, ListingCategory } from '../../src/types/listing';
+import { NIT_HOSTELS, NITHostel } from '../../src/constants/campus';
 import { useMarketplace } from '../../src/context/MarketplaceContext';
 import ListingCard from '../../src/components/ListingCard';
 import RequestCard from '../../src/components/RequestCard';
@@ -19,14 +21,7 @@ import RequestCard from '../../src/components/RequestCard';
 
 type FeedFilterType = 'ALL' | 'HAVE' | 'NEED';
 type CategoryFilterType = ListingCategory;
-type HostelFilterType =
-  | 'All'
-  | 'Hostel 1'
-  | 'Hostel 2'
-  | 'Hostel 3'
-  | 'Hostel 4'
-  | 'Hostel 5'
-  | 'Other';
+type HostelFilterType = 'All' | NITHostel;
 type ModeFilterType = 'All' | 'Rent' | 'Sell' | 'Give Away';
 
 const FEED_OPTIONS: { label: string; value: FeedFilterType }[] = [
@@ -45,15 +40,8 @@ const CATEGORY_OPTIONS: CategoryFilterType[] = [
   'Other',
 ];
 
-const HOSTEL_OPTIONS: HostelFilterType[] = [
-  'All',
-  'Hostel 1',
-  'Hostel 2',
-  'Hostel 3',
-  'Hostel 4',
-  'Hostel 5',
-  'Other',
-];
+/** Full hostel list drawn from the shared campus constant — single source of truth. */
+const HOSTEL_OPTIONS: HostelFilterType[] = ['All', ...NIT_HOSTELS];
 
 const MODE_OPTIONS: { label: ModeFilterType; value: ModeFilterType }[] = [
   { label: 'All', value: 'All' },
@@ -86,7 +74,14 @@ type SearchResultItem =
   | { type: 'NEED'; data: RequestItem };
 
 export default function SearchScreen() {
-  const { listings, requests } = useMarketplace();
+  const { listings, requests, refresh } = useMarketplace();
+
+  // Re-fetch every time the Search tab comes into focus so latest listings appear
+  useFocusEffect(
+    React.useCallback(() => {
+      refresh();
+    }, [refresh])
+  );
 
   // State
   const [searchQuery, setSearchQuery] = useState('');
@@ -137,15 +132,8 @@ export default function SearchScreen() {
       }
 
       // 3. Hostel filter
-      if (selectedHostel !== 'All') {
-        if (selectedHostel === 'Other') {
-          const standardHostels = ['Hostel 1', 'Hostel 2', 'Hostel 3', 'Hostel 4', 'Hostel 5'];
-          if (standardHostels.includes(item.hostel) && item.hostel !== 'Other') {
-            return false;
-          }
-        } else if (item.hostel !== selectedHostel) {
-          return false;
-        }
+      if (selectedHostel !== 'All' && item.hostel !== selectedHostel) {
+        return false;
       }
 
       // 4. Mode filter (All, Rent, Sell, Give Away)
@@ -182,15 +170,8 @@ export default function SearchScreen() {
       }
 
       // 3. Hostel filter
-      if (selectedHostel !== 'All') {
-        if (selectedHostel === 'Other') {
-          const standardHostels = ['Hostel 1', 'Hostel 2', 'Hostel 3', 'Hostel 4', 'Hostel 5'];
-          if (standardHostels.includes(item.hostel) && item.hostel !== 'Other') {
-            return false;
-          }
-        } else if (item.hostel !== selectedHostel) {
-          return false;
-        }
+      if (selectedHostel !== 'All' && item.hostel !== selectedHostel) {
+        return false;
       }
 
       return true;

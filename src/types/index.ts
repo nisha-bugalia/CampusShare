@@ -48,3 +48,20 @@ export type {
 
 // Database-backed push token entities
 export type { DbPushToken, DbPushTokenInsert } from './databasePushToken';
+
+// Safety system entities
+export type {
+  BlockStatus,
+  Block,
+  ReportTargetType,
+  ReportReason,
+  ReportStatus,
+  Report,
+} from './safety';
+
+// Settings & feedback entities
+export type {
+  NotificationPreferences,
+  FeedbackType,
+  FeedbackSubmission,
+} from './settings';

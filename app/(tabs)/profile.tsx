@@ -97,14 +97,6 @@ export default function ProfileScreen() {
     );
   };
 
-  const handleActionPlaceholder = (actionName: string) => {
-    Alert.alert(
-      actionName,
-      `${actionName} functionality will be available in an upcoming update.`,
-      [{ text: 'OK' }]
-    );
-  };
-
   const handleLogout = () => {
     Alert.alert(
       'Log Out',
@@ -230,19 +222,43 @@ export default function ProfileScreen() {
 
   const renderFooter = () => (
     <View style={styles.footerContainer}>
-      {/* ── Account & Settings Section ── */}
-      <Text style={styles.sectionTitle}>Account & Settings</Text>
+      {/* ── Account Section ── */}
+      <Text style={styles.sectionTitle}>Account</Text>
       <View style={styles.actionsCard}>
         <TouchableOpacity
           style={styles.actionRow}
-          onPress={() => handleActionPlaceholder('Edit Profile')}
+          onPress={() => router.push('/profile/edit')}
           activeOpacity={0.7}
         >
           <View style={styles.actionRowLeft}>
             <View style={styles.actionIconContainer}>
               <Text style={styles.actionIcon}>✏️</Text>
             </View>
-            <Text style={styles.actionRowText}>Edit Profile</Text>
+            <View style={styles.textColumn}>
+              <Text style={styles.actionRowText}>Edit Profile</Text>
+              <Text style={styles.actionRowSubtitle}>Display name, branch, and hostel</Text>
+            </View>
+          </View>
+          <Text style={styles.actionChevron}>›</Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* ── Settings Section ── */}
+      <Text style={[styles.sectionTitle, { marginTop: Spacing.md }]}>Settings</Text>
+      <View style={styles.actionsCard}>
+        <TouchableOpacity
+          style={styles.actionRow}
+          onPress={() => router.push('/settings/notifications')}
+          activeOpacity={0.7}
+        >
+          <View style={styles.actionRowLeft}>
+            <View style={styles.actionIconContainer}>
+              <Text style={styles.actionIcon}>🔔</Text>
+            </View>
+            <View style={styles.textColumn}>
+              <Text style={styles.actionRowText}>Notifications</Text>
+              <Text style={styles.actionRowSubtitle}>Chat notifications</Text>
+            </View>
           </View>
           <Text style={styles.actionChevron}>›</Text>
         </TouchableOpacity>
@@ -251,20 +267,83 @@ export default function ProfileScreen() {
 
         <TouchableOpacity
           style={styles.actionRow}
-          onPress={() => handleActionPlaceholder('Settings')}
+          onPress={() => router.push('/blocked-users')}
           activeOpacity={0.7}
         >
           <View style={styles.actionRowLeft}>
-            <View style={styles.actionIconContainer}>
-              <Text style={styles.actionIcon}>⚙️</Text>
+            <View style={[styles.actionIconContainer, { backgroundColor: '#FEF2F2' }]}>
+              <Text style={styles.actionIcon}>🚫</Text>
             </View>
-            <Text style={styles.actionRowText}>Settings</Text>
+            <View style={styles.textColumn}>
+              <Text style={styles.actionRowText}>Blocked Users</Text>
+              <Text style={styles.actionRowSubtitle}>Manage blocked accounts</Text>
+            </View>
           </View>
           <Text style={styles.actionChevron}>›</Text>
         </TouchableOpacity>
 
         <View style={styles.actionDivider} />
 
+        <TouchableOpacity
+          style={styles.actionRow}
+          onPress={() => router.push('/settings/privacy')}
+          activeOpacity={0.7}
+        >
+          <View style={styles.actionRowLeft}>
+            <View style={styles.actionIconContainer}>
+              <Text style={styles.actionIcon}>🔒</Text>
+            </View>
+            <View style={styles.textColumn}>
+              <Text style={styles.actionRowText}>Privacy</Text>
+              <Text style={styles.actionRowSubtitle}>Data usage & visibility rules</Text>
+            </View>
+          </View>
+          <Text style={styles.actionChevron}>›</Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* ── Help & Support Section ── */}
+      <Text style={[styles.sectionTitle, { marginTop: Spacing.md }]}>Help & Support</Text>
+      <View style={styles.actionsCard}>
+        <TouchableOpacity
+          style={styles.actionRow}
+          onPress={() => router.push('/settings/help')}
+          activeOpacity={0.7}
+        >
+          <View style={styles.actionRowLeft}>
+            <View style={[styles.actionIconContainer, { backgroundColor: '#FEF3C7' }]}>
+              <Text style={styles.actionIcon}>🆘</Text>
+            </View>
+            <View style={styles.textColumn}>
+              <Text style={styles.actionRowText}>Help & Feedback</Text>
+              <Text style={styles.actionRowSubtitle}>Report a problem or share feedback</Text>
+            </View>
+          </View>
+          <Text style={styles.actionChevron}>›</Text>
+        </TouchableOpacity>
+
+        <View style={styles.actionDivider} />
+
+        <TouchableOpacity
+          style={styles.actionRow}
+          onPress={() => router.push('/settings/about')}
+          activeOpacity={0.7}
+        >
+          <View style={styles.actionRowLeft}>
+            <View style={styles.actionIconContainer}>
+              <Text style={styles.actionIcon}>ℹ️</Text>
+            </View>
+            <View style={styles.textColumn}>
+              <Text style={styles.actionRowText}>About CampusShare</Text>
+              <Text style={styles.actionRowSubtitle}>Version and project information</Text>
+            </View>
+          </View>
+          <Text style={styles.actionChevron}>›</Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* ── Log Out Card ── */}
+      <View style={[styles.actionsCard, { marginTop: Spacing.md }]}>
         <TouchableOpacity
           style={styles.actionRow}
           onPress={handleLogout}
@@ -274,7 +353,10 @@ export default function ProfileScreen() {
             <View style={[styles.actionIconContainer, { backgroundColor: '#FEF2F2' }]}>
               <Text style={styles.actionIcon}>🚪</Text>
             </View>
-            <Text style={[styles.actionRowText, { color: Colors.light.error }]}>Log Out</Text>
+            <View style={styles.textColumn}>
+              <Text style={[styles.actionRowText, { color: Colors.light.error }]}>Log Out</Text>
+              <Text style={styles.actionRowSubtitle}>Sign out of your account</Text>
+            </View>
           </View>
           <Text style={[styles.actionChevron, { color: Colors.light.error }]}>›</Text>
         </TouchableOpacity>
@@ -621,6 +703,16 @@ const styles = StyleSheet.create({
   actionRowLeft: {
     flexDirection: 'row',
     alignItems: 'center',
+    flex: 1,
+  },
+  textColumn: {
+    flex: 1,
+    justifyContent: 'center',
+  },
+  actionRowSubtitle: {
+    fontSize: 12,
+    color: Colors.light.textMuted,
+    marginTop: 2,
   },
   actionIconContainer: {
     width: 32,
