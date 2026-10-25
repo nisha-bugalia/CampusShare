@@ -16,6 +16,7 @@ export type DbRequestDuration =
 export type DbRequestStatus =
   | 'active'
   | 'fulfilled'
+  | 'cancelled'
   | 'inactive'
   | 'archived';
 

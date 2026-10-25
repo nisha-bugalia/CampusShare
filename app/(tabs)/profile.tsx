@@ -24,7 +24,14 @@ export default function ProfileScreen() {
   const router = useRouter();
   const { signOut, user } = useAuth();
   const { profile, isLoading: profileLoading } = useProfile();
-  const { listings, requests, isLoading: feedLoading, refresh, deleteListing, deleteRequest } = useMarketplace();
+  const {
+    myListings,
+    myRequests,
+    isLoading: feedLoading,
+    refresh,
+    deleteListing,
+    deleteRequest,
+  } = useMarketplace();
   const [activeTab, setActiveTab] = useState<TabType>('HAVE');
 
   // Re-fetch feed whenever Profile tab is active so new posts appear immediately
@@ -33,10 +40,6 @@ export default function ProfileScreen() {
       refresh();
     }, [refresh])
   );
-
-  // Filter to only the authenticated user's own posts
-  const myListings = listings.filter((item) => item.user_id === user?.id);
-  const myRequests = requests.filter((item) => item.user_id === user?.id);
 
   // Derive display values from the real profile (fallback to auth metadata)
   const displayName =

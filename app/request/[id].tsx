@@ -16,9 +16,11 @@ import { useMarketplace } from '../../src/context/MarketplaceContext';
 import { Colors } from '../../src/constants/colors';
 import { Spacing, BorderRadius } from '../../src/constants/layout';
 import { RequestItem, ListingCategory } from '../../src/types/listing';
+import { DbRequestStatus } from '../../src/types/databaseRequest';
 import { supabase } from '../../src/lib/supabase';
 import { useAuth } from '../../src/context/AuthContext';
 import { getOrCreateRequestConversation } from '../../src/services/chatService';
+import { updateRequestStatus } from '../../src/services/requestService';
 import {
   formatTimeAgo,
   formatBudget,
@@ -27,18 +29,37 @@ import {
 import { blockUser, unblockUser, checkBlockStatus } from '../../src/services/safetyService';
 import { BlockStatus } from '../../src/types/safety';
 import ReportModal from '../../src/components/ReportModal';
+import StatusConfirmModal from '../../src/components/StatusConfirmModal';
 
 export default function RequestDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
 
-  const { requests } = useMarketplace();
+  const { requests, refresh: refreshMarketplace, deleteRequest } = useMarketplace();
   const { user } = useAuth();
   const localRequest = requests.find((item) => item.id === id);
 
   const [dbRequest, setDbRequest] = useState<RequestItem | null>(null);
   const [isLoadingDb, setIsLoadingDb] = useState<boolean>(!localRequest && !!id);
   const [isStartingChat, setIsStartingChat] = useState<boolean>(false);
+  const [isUpdatingStatus, setIsUpdatingStatus] = useState<boolean>(false);
+
+  // Status confirm modal state
+  const [confirmModal, setConfirmModal] = useState<{
+    visible: boolean;
+    title: string;
+    message: string;
+    confirmLabel: string;
+    confirmColor?: string;
+    icon?: string;
+    targetStatus: DbRequestStatus;
+  }>({
+    visible: false,
+    title: '',
+    message: '',
+    confirmLabel: '',
+    targetStatus: 'active',
+  });
 
   // Safety state
   const [blockStatus, setBlockStatus] = useState<BlockStatus>({
@@ -121,10 +142,12 @@ export default function RequestDetailScreen() {
           category: data.category as Exclude<ListingCategory, 'All'>,
           urgency: 'Needed',
           budget: formatBudget(data.budget),
+          rawBudget: data.budget,
           hostel: data.hostel,
           description: data.description,
           icon: getCategoryIcon(data.category),
           timeAgo: formatTimeAgo(data.created_at),
+          status: (data.status as DbRequestStatus) || 'active',
           requesterName,
           requesterBranch,
           requesterHostel,
@@ -251,6 +274,81 @@ export default function RequestDetailScreen() {
     );
   }
 
+  const isCreator = !!(user?.id && request?.user_id && user.id === request.user_id);
+
+  const handlePromptMarkFulfilled = () => {
+    setConfirmModal({
+      visible: true,
+      title: 'Mark this request as fulfilled?',
+      message:
+        'This will remove the request from the active feed. It will remain in your history.',
+      confirmLabel: 'Mark as Fulfilled',
+      confirmColor: '#16A34A',
+      icon: '✅',
+      targetStatus: 'fulfilled',
+    });
+  };
+
+  const handlePromptCancelRequest = () => {
+    setConfirmModal({
+      visible: true,
+      title: 'Cancel this request?',
+      message: 'This will cancel the request and remove it from the active feed.',
+      confirmLabel: 'Cancel Request',
+      confirmColor: '#DC2626',
+      icon: '🚫',
+      targetStatus: 'cancelled',
+    });
+  };
+
+  const handleConfirmStatusChange = async () => {
+    if (!request?.id || isUpdatingStatus) return;
+    try {
+      setIsUpdatingStatus(true);
+      const { data: updated, error } = await updateRequestStatus(
+        request.id,
+        confirmModal.targetStatus
+      );
+
+      if (error || !updated) {
+        Alert.alert('Status Error', error?.message || 'Failed to update request status.');
+        return;
+      }
+
+      setDbRequest(updated);
+      setConfirmModal((prev) => ({ ...prev, visible: false }));
+      await refreshMarketplace();
+    } catch (err: any) {
+      Alert.alert('Error', err?.message || 'An unexpected error occurred.');
+    } finally {
+      setIsUpdatingStatus(false);
+    }
+  };
+
+  const handleDeleteRequest = () => {
+    if (!request?.id) return;
+    Alert.alert(
+      'Delete Request',
+      'Are you sure you want to permanently delete this request? This action cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            const { error } = await deleteRequest(request.id);
+            if (error) {
+              Alert.alert('Delete Failed', error.message);
+            } else {
+              await refreshMarketplace();
+              router.back();
+            }
+          },
+        },
+      ]
+    );
+  };
+
   const renderUrgencyBadge = () => {
     if (request.urgency === 'Urgent') {
       return (
@@ -262,6 +360,62 @@ export default function RequestDetailScreen() {
     return (
       <View style={[styles.badge, styles.badgeNeeded]}>
         <Text style={styles.badgeNeededText}>I NEED</Text>
+      </View>
+    );
+  };
+
+  const renderStatusBadge = () => {
+    if (!request) return null;
+    const isOwnerRequest = user?.id === request.user_id;
+
+    if (request.status === 'fulfilled') {
+      return (
+        <View style={[styles.badge, styles.badgeStatusFulfilled]}>
+          <Text style={styles.badgeStatusFulfilledText}>✅ FULFILLED</Text>
+        </View>
+      );
+    }
+    if (request.status === 'cancelled') {
+      return (
+        <View style={[styles.badge, styles.badgeStatusCancelled]}>
+          <Text style={styles.badgeStatusCancelledText}>⚪ CANCELLED</Text>
+        </View>
+      );
+    }
+    if (isOwnerRequest && request.status === 'active') {
+      return (
+        <View style={[styles.badge, styles.badgeStatusActive]}>
+          <Text style={styles.badgeStatusActiveText}>🟢 ACTIVE</Text>
+        </View>
+      );
+    }
+    return null;
+  };
+
+  const renderInactiveStatusBanner = () => {
+    if (!request || request.status === 'active') return null;
+
+    let bannerBg = '#ECFDF5';
+    let bannerBorder = '#A7F3D0';
+    let bannerTitle = 'Fulfilled — Request Completed';
+    let bannerDesc = 'The requester has found what they needed.';
+    let bannerIcon = '✅';
+
+    if (request.status === 'cancelled') {
+      bannerBg = '#F8FAFC';
+      bannerBorder = '#E2E8F0';
+      bannerTitle = 'Request Cancelled';
+      bannerDesc = 'This request was cancelled by the creator.';
+      bannerIcon = '⚪';
+    }
+
+    return (
+      <View style={[styles.inactiveBanner, { backgroundColor: bannerBg, borderColor: bannerBorder }]}>
+        <Text style={styles.inactiveBannerIcon}>{bannerIcon}</Text>
+        <View style={styles.inactiveBannerTextCol}>
+          <Text style={styles.inactiveBannerTitle}>{bannerTitle}</Text>
+          <Text style={styles.inactiveBannerDesc}>{bannerDesc}</Text>
+        </View>
       </View>
     );
   };
@@ -349,10 +503,15 @@ export default function RequestDetailScreen() {
           <Text style={styles.bannerLabel}>I NEED</Text>
         </View>
 
+        {renderInactiveStatusBanner()}
+
         {/* Header Section */}
         <View style={styles.headerSection}>
           <View style={styles.badgeRow}>
-            {renderUrgencyBadge()}
+            <View style={styles.badgeGroup}>
+              {renderUrgencyBadge()}
+              {renderStatusBadge()}
+            </View>
             <Text style={styles.timeAgo}>Posted {request.timeAgo}</Text>
           </View>
           <Text style={styles.title}>{request.title}</Text>
@@ -428,30 +587,102 @@ export default function RequestDetailScreen() {
           </View>
         </View>
 
-        <View style={{ height: 100 }} />
+        <View style={{ height: 120 }} />
       </ScrollView>
 
-      {/* Sticky Bottom Bar */}
-      <View style={styles.bottomBar}>
-        <TouchableOpacity
-          style={[
-            styles.actionButton,
-            styles.chatButton,
-            (isStartingChat || blockStatus.isBidirectional) && { opacity: 0.6 },
-          ]}
-          activeOpacity={0.8}
-          onPress={handleChat}
-          disabled={isStartingChat || blockStatus.isBidirectional}
-        >
-          {isStartingChat ? (
-            <ActivityIndicator size="small" color="#FFFFFF" />
-          ) : (
-            <Text style={styles.chatButtonText}>
-              {blockStatus.isBidirectional ? '🚫  Requester is Blocked' : '💬  Chat with Requester'}
-            </Text>
+      {/* Bottom Action Bar */}
+      {isCreator ? (
+        <View style={styles.ownerBottomBarContainer}>
+          {/* Primary Lifecycle CTA */}
+          {request.status === 'active' && (
+            <TouchableOpacity
+              style={[styles.ownerPrimaryButton, styles.primaryFulfilledButton]}
+              onPress={handlePromptMarkFulfilled}
+              activeOpacity={0.8}
+              disabled={isUpdatingStatus}
+            >
+              <Text style={styles.primaryButtonText}>✅  Mark as Fulfilled</Text>
+            </TouchableOpacity>
           )}
-        </TouchableOpacity>
-      </View>
+
+          {/* Secondary Controls: Edit, Cancel, Delete */}
+          <View style={styles.ownerSecondaryRow}>
+            {request.status === 'active' && (
+              <TouchableOpacity
+                style={styles.secondaryButton}
+                onPress={() => router.push(`/edit/need?id=${request.id}`)}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.secondaryButtonText}>✏️ Edit</Text>
+              </TouchableOpacity>
+            )}
+
+            {request.status === 'active' && (
+              <TouchableOpacity
+                style={styles.secondaryButton}
+                onPress={handlePromptCancelRequest}
+                activeOpacity={0.8}
+                disabled={isUpdatingStatus}
+              >
+                <Text style={[styles.secondaryButtonText, { color: '#DC2626' }]}>🚫 Cancel</Text>
+              </TouchableOpacity>
+            )}
+
+            <TouchableOpacity
+              style={styles.secondaryButton}
+              onPress={handleDeleteRequest}
+              activeOpacity={0.8}
+              disabled={isUpdatingStatus}
+            >
+              <Text style={[styles.secondaryButtonText, { color: '#DC2626' }]}>🗑️ Delete</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      ) : (
+        <View style={styles.bottomBar}>
+          {request.status === 'active' ? (
+            <TouchableOpacity
+              style={[
+                styles.actionButton,
+                styles.chatButton,
+                (isStartingChat || blockStatus.isBidirectional) && { opacity: 0.6 },
+              ]}
+              activeOpacity={0.8}
+              onPress={handleChat}
+              disabled={isStartingChat || blockStatus.isBidirectional}
+            >
+              {isStartingChat ? (
+                <ActivityIndicator size="small" color="#FFFFFF" />
+              ) : (
+                <Text style={styles.chatButtonText}>
+                  {blockStatus.isBidirectional ? '🚫  Requester is Blocked' : '💬  Chat with Requester'}
+                </Text>
+              )}
+            </TouchableOpacity>
+          ) : (
+            <View style={[styles.actionButton, styles.disabledButton]}>
+              <Text style={styles.disabledButtonText}>
+                {request.status === 'fulfilled'
+                  ? '🔒  Request Fulfilled'
+                  : '🔒  Request Cancelled'}
+              </Text>
+            </View>
+          )}
+        </View>
+      )}
+
+      {/* Status Confirmation Modal */}
+      <StatusConfirmModal
+        visible={confirmModal.visible}
+        title={confirmModal.title}
+        message={confirmModal.message}
+        confirmLabel={confirmModal.confirmLabel}
+        confirmColor={confirmModal.confirmColor}
+        icon={confirmModal.icon}
+        isLoading={isUpdatingStatus}
+        onConfirm={handleConfirmStatusChange}
+        onCancel={() => setConfirmModal((prev) => ({ ...prev, visible: false }))}
+      />
 
       {/* Safety Report Modal */}
       <ReportModal
@@ -524,6 +755,11 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginBottom: 10,
   },
+  badgeGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
   badge: {
     paddingHorizontal: 10,
     paddingVertical: 4,
@@ -533,6 +769,102 @@ const styles = StyleSheet.create({
   badgeUrgentText: { fontSize: 11, fontWeight: '700', color: '#DC2626', letterSpacing: 0.5 },
   badgeNeeded: { backgroundColor: '#FFFBEB' },
   badgeNeededText: { fontSize: 11, fontWeight: '700', color: '#D97706', letterSpacing: 0.5 },
+  badgeStatusFulfilled: { backgroundColor: '#ECFDF5', borderWidth: 1, borderColor: '#A7F3D0' },
+  badgeStatusFulfilledText: { fontSize: 10, fontWeight: '700', color: '#047857', letterSpacing: 0.5 },
+  badgeStatusCancelled: { backgroundColor: '#F1F5F9', borderWidth: 1, borderColor: '#E2E8F0' },
+  badgeStatusCancelledText: { fontSize: 10, fontWeight: '700', color: '#64748B', letterSpacing: 0.5 },
+  badgeStatusActive: { backgroundColor: '#EFF6FF', borderWidth: 1, borderColor: '#BFDBFE' },
+  badgeStatusActiveText: { fontSize: 10, fontWeight: '700', color: '#1D4ED8', letterSpacing: 0.5 },
+  inactiveBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: Spacing.md,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+  },
+  inactiveBannerIcon: {
+    fontSize: 22,
+    marginRight: 12,
+  },
+  inactiveBannerTextCol: {
+    flex: 1,
+  },
+  inactiveBannerTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#0F172A',
+    marginBottom: 2,
+  },
+  inactiveBannerDesc: {
+    fontSize: 12,
+    color: '#64748B',
+    lineHeight: 16,
+  },
+  ownerBottomBarContainer: {
+    backgroundColor: '#FFFFFF',
+    borderTopWidth: 1,
+    borderTopColor: '#E2E8F0',
+    paddingHorizontal: Spacing.md,
+    paddingTop: 12,
+    paddingBottom: 16,
+    gap: 10,
+  },
+  ownerPrimaryButton: {
+    width: '100%',
+    minHeight: 50,
+    paddingVertical: 14,
+    paddingHorizontal: Spacing.md,
+    borderRadius: BorderRadius.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+  },
+  primaryFulfilledButton: {
+    backgroundColor: '#16A34A',
+    shadowColor: '#16A34A',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 6,
+    elevation: 3,
+  },
+  primaryButtonText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    textAlign: 'center',
+    includeFontPadding: false,
+    zIndex: 2,
+  },
+  ownerSecondaryRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  secondaryButton: {
+    flex: 1,
+    height: 40,
+    borderRadius: BorderRadius.md,
+    backgroundColor: '#F1F5F9',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  secondaryButtonText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#334155',
+  },
+  disabledButton: {
+    backgroundColor: '#F1F5F9',
+    borderWidth: 1,
+    borderColor: '#CBD5E1',
+  },
+  disabledButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#64748B',
+  },
   timeAgo: {
     fontSize: 12,
     color: '#94A3B8',
@@ -689,7 +1021,9 @@ const styles = StyleSheet.create({
   },
   actionButton: {
     flex: 1,
+    minHeight: 48,
     paddingVertical: 14,
+    paddingHorizontal: Spacing.md,
     borderRadius: BorderRadius.md,
     alignItems: 'center',
     justifyContent: 'center',

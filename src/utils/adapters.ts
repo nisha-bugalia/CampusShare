@@ -45,10 +45,14 @@ export function formatTimeAgo(isoString: string): string {
 
 export function formatListingPrice(
   listingType: string,
-  price: number | null
+  price: number | null,
+  rentalUnit?: string | null
 ): string {
   if (listingType === 'give' || price === null) return 'Free';
-  if (listingType === 'rent') return `\u20B9${price} / day`;
+  if (listingType === 'rent') {
+    const unit = rentalUnit === 'hour' ? 'hour' : 'day';
+    return `\u20B9${price} / ${unit}`;
+  }
   return `\u20B9${price}`;
 }
 
@@ -86,12 +90,17 @@ export function dbListingToListing(db: DbListingWithOwner): Listing {
     title: db.title,
     category: db.category as Listing['category'],
     mode: listingTypeToMode(db.listing_type),
-    price: formatListingPrice(db.listing_type, db.price),
+    price: formatListingPrice(db.listing_type, db.price, db.rental_unit),
+    rawPrice: db.price,
+    rentalUnit: db.rental_unit === 'hour' ? 'hour' : 'day',
     hostel: db.hostel,
     description: db.description,
     icon: getCategoryIcon(db.category),
     timeAgo: formatTimeAgo(db.created_at),
     image_url: db.image_url ?? null,
+    status: db.status || 'active',
+    rentedToUserId: db.rented_to_user_id ?? null,
+    rentedAt: db.rented_at ?? null,
     ownerName: owner?.name ?? 'Campus User',
     ownerBranch: owner?.branch ? `${owner.branch}, NIT Kurukshetra` : 'NIT Kurukshetra',
     ownerHostel: owner?.hostel ?? db.hostel,
@@ -115,10 +124,12 @@ export function dbRequestToRequestItem(db: DbRequestWithOwner): RequestItem {
     category: db.category as RequestItem['category'],
     urgency: 'Needed',
     budget: formatBudget(db.budget),
+    rawBudget: db.budget,
     hostel: db.hostel,
     description: db.description,
     icon: getCategoryIcon(db.category),
     timeAgo: formatTimeAgo(db.created_at),
+    status: db.status || 'active',
     requesterName: requester?.name ?? 'Campus User',
     requesterBranch: requester?.branch ? `${requester.branch}, NIT Kurukshetra` : 'NIT Kurukshetra',
     requesterHostel: requester?.hostel ?? db.hostel,

@@ -10,10 +10,19 @@ export type DbListingType = 'rent' | 'sell' | 'give';
  */
 export type DbListingStatus =
   | 'active'
+  | 'rented'
+  | 'sold'
+  | 'given'
+  | 'cancelled'
   | 'reserved'
   | 'completed'
   | 'inactive'
   | 'archived';
+
+/**
+ * Allowed billing units for rental listings
+ */
+export type RentalUnit = 'day' | 'hour';
 
 /**
  * DbListing — represents a row in public.listings (Supabase).
@@ -40,6 +49,9 @@ export interface DbListing {
   /** Price in INR (null for free/give items) */
   price: number | null;
 
+  /** Rental billing unit: 'day' or 'hour' (null for sell/give items, defaults to 'day' for rent) */
+  rental_unit?: RentalUnit | null;
+
   /** Item description and details */
   description: string;
 
@@ -57,6 +69,12 @@ export interface DbListing {
 
   /** Listing status */
   status: DbListingStatus;
+
+  /** Renter user ID (when status is 'rented') */
+  rented_to_user_id?: string | null;
+
+  /** ISO 8601 timestamp when the item was marked as rented */
+  rented_at?: string | null;
 
   /** ISO 8601 creation timestamp */
   created_at: string;

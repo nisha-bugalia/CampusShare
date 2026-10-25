@@ -2,7 +2,7 @@ import React, { useEffect } from 'react';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { View, Text, StyleSheet, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, ActivityIndicator, Image } from 'react-native';
 import { Colors } from '../src/constants/colors';
 import { MarketplaceProvider } from '../src/context/MarketplaceContext';
 import { AuthProvider, useAuth } from '../src/context/AuthContext';
@@ -62,9 +62,11 @@ function RootNavigator() {
   if (isCheckingAuth) {
     return (
       <View style={styles.splashContainer}>
-        <View style={styles.splashBadge}>
-          <Text style={styles.splashIcon}>🏛️</Text>
-        </View>
+        <Image
+          source={require('../assets/a_clean_high_resolution_isolated_app_icon_style.png')}
+          style={styles.splashLogo}
+          resizeMode="contain"
+        />
         <Text style={styles.splashTitle}>CampusShare</Text>
         <Text style={styles.splashSubtitle}>NIT Kurukshetra</Text>
         <ActivityIndicator
@@ -139,19 +141,10 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.light.background,
     padding: 24,
   },
-  splashBadge: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
-    backgroundColor: '#EFF6FF',
-    borderWidth: 2,
-    borderColor: '#BFDBFE',
-    alignItems: 'center',
-    justifyContent: 'center',
+  splashLogo: {
+    width: 100,
+    height: 100,
     marginBottom: 16,
-  },
-  splashIcon: {
-    fontSize: 36,
   },
   splashTitle: {
     fontSize: 26,

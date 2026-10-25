@@ -38,6 +38,25 @@ export default function RequestCard({ item, onPress, onEdit, onDelete }: Request
     );
   };
 
+  const renderStatusBadge = () => {
+    if (!item.status || item.status === 'active') return null;
+    if (item.status === 'fulfilled') {
+      return (
+        <View style={[styles.badge, styles.badgeStatusFulfilled]}>
+          <Text style={styles.badgeStatusFulfilledText}>FULFILLED</Text>
+        </View>
+      );
+    }
+    if (item.status === 'cancelled') {
+      return (
+        <View style={[styles.badge, styles.badgeStatusCancelled]}>
+          <Text style={styles.badgeStatusCancelledText}>CANCELLED</Text>
+        </View>
+      );
+    }
+    return null;
+  };
+
   return (
     <TouchableOpacity
       style={styles.card}
@@ -46,7 +65,10 @@ export default function RequestCard({ item, onPress, onEdit, onDelete }: Request
     >
       {/* Card Header: Badge + Time */}
       <View style={styles.cardHeader}>
-        {renderUrgencyBadge()}
+        <View style={styles.badgeRow}>
+          {renderUrgencyBadge()}
+          {renderStatusBadge()}
+        </View>
         <Text style={styles.timeAgo}>{item.timeAgo}</Text>
       </View>
 
@@ -83,8 +105,12 @@ export default function RequestCard({ item, onPress, onEdit, onDelete }: Request
             {item.requesterName.charAt(0).toUpperCase()}
           </Text>
         </View>
-        <Text style={styles.requesterName}>{item.requesterName}</Text>
-        <Text style={styles.requesterBranch}>  •  {item.requesterBranch}</Text>
+        <Text style={styles.requesterText} numberOfLines={2} ellipsizeMode="tail">
+          <Text style={styles.requesterName}>{item.requesterName}</Text>
+          {item.requesterBranch ? (
+            <Text style={styles.requesterBranch}>  •  {item.requesterBranch}</Text>
+          ) : null}
+        </Text>
       </View>
 
       {(onEdit || onDelete) && (
@@ -142,6 +168,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: Spacing.sm,
   },
+  badgeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
   badge: {
     paddingHorizontal: 8,
     paddingVertical: 3,
@@ -163,6 +194,28 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: '700',
     color: '#D97706',
+    letterSpacing: 0.5,
+  },
+  badgeStatusFulfilled: {
+    backgroundColor: '#ECFDF5',
+    borderWidth: 1,
+    borderColor: '#A7F3D0',
+  },
+  badgeStatusFulfilledText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#047857',
+    letterSpacing: 0.5,
+  },
+  badgeStatusCancelled: {
+    backgroundColor: '#F1F5F9',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  badgeStatusCancelledText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#64748B',
     letterSpacing: 0.5,
   },
   timeAgo: {
@@ -217,6 +270,7 @@ const styles = StyleSheet.create({
   locationRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    flexShrink: 1,
   },
   locationPin: {
     fontSize: 11,
@@ -226,6 +280,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '500',
     color: Colors.light.textMuted,
+    flexShrink: 1,
   },
   itemDescription: {
     fontSize: 13,
@@ -251,11 +306,18 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 6,
+    flexShrink: 0,
   },
   requesterAvatarText: {
     fontSize: 10,
     fontWeight: '800',
     color: '#92400E',
+  },
+  requesterText: {
+    flex: 1,
+    flexShrink: 1,
+    fontSize: 12,
+    lineHeight: 16,
   },
   requesterName: {
     fontSize: 12,

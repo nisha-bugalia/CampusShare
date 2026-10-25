@@ -47,6 +47,38 @@ export default function ListingCard({ item, onPress, onEdit, onDelete }: Listing
     }
   };
 
+  const renderStatusBadge = () => {
+    if (!item.status || item.status === 'active') return null;
+    switch (item.status) {
+      case 'rented':
+        return (
+          <View style={[styles.badge, styles.badgeStatusRented]}>
+            <Text style={styles.badgeStatusRentedText}>RENTED</Text>
+          </View>
+        );
+      case 'sold':
+        return (
+          <View style={[styles.badge, styles.badgeStatusSold]}>
+            <Text style={styles.badgeStatusSoldText}>SOLD</Text>
+          </View>
+        );
+      case 'given':
+        return (
+          <View style={[styles.badge, styles.badgeStatusGiven]}>
+            <Text style={styles.badgeStatusGivenText}>GIVEN</Text>
+          </View>
+        );
+      case 'cancelled':
+        return (
+          <View style={[styles.badge, styles.badgeStatusCancelled]}>
+            <Text style={styles.badgeStatusCancelledText}>CANCELLED</Text>
+          </View>
+        );
+      default:
+        return null;
+    }
+  };
+
   const hasImage = !!item.image_url && !imgError;
 
   return (
@@ -56,7 +88,10 @@ export default function ListingCard({ item, onPress, onEdit, onDelete }: Listing
       onPress={handlePress}
     >
       <View style={styles.cardHeader}>
-        {renderModeBadge(item.mode)}
+        <View style={styles.badgeRow}>
+          {renderModeBadge(item.mode)}
+          {renderStatusBadge()}
+        </View>
         <Text style={styles.timeAgo}>{item.timeAgo}</Text>
       </View>
 
@@ -82,7 +117,9 @@ export default function ListingCard({ item, onPress, onEdit, onDelete }: Listing
           <Text style={styles.itemPrice}>{item.price}</Text>
           <View style={styles.locationRow}>
             <Text style={styles.locationPin}>📍</Text>
-            <Text style={styles.locationText}>{item.hostel}</Text>
+            <Text style={styles.locationText} numberOfLines={1} ellipsizeMode="tail">
+              {item.hostel}
+            </Text>
           </View>
         </View>
       </View>
@@ -146,6 +183,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: Spacing.sm,
   },
+  badgeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
   badge: {
     paddingHorizontal: 8,
     paddingVertical: 3,
@@ -157,6 +199,14 @@ const styles = StyleSheet.create({
   badgeSellText: { fontSize: 10, fontWeight: '700', color: '#047857', letterSpacing: 0.5 },
   badgeFree: { backgroundColor: '#FAF5FF' },
   badgeFreeText: { fontSize: 10, fontWeight: '700', color: '#7E22CE', letterSpacing: 0.5 },
+  badgeStatusRented: { backgroundColor: '#FFF7ED', borderWidth: 1, borderColor: '#FED7AA' },
+  badgeStatusRentedText: { fontSize: 10, fontWeight: '700', color: '#C2410C', letterSpacing: 0.5 },
+  badgeStatusSold: { backgroundColor: '#FDF2F8', borderWidth: 1, borderColor: '#FBCFE8' },
+  badgeStatusSoldText: { fontSize: 10, fontWeight: '700', color: '#BE185D', letterSpacing: 0.5 },
+  badgeStatusGiven: { backgroundColor: '#F0FDF4', borderWidth: 1, borderColor: '#BBF7D0' },
+  badgeStatusGivenText: { fontSize: 10, fontWeight: '700', color: '#15803D', letterSpacing: 0.5 },
+  badgeStatusCancelled: { backgroundColor: '#F1F5F9', borderWidth: 1, borderColor: '#E2E8F0' },
+  badgeStatusCancelledText: { fontSize: 10, fontWeight: '700', color: '#64748B', letterSpacing: 0.5 },
   timeAgo: {
     fontSize: 11,
     color: Colors.light.textMuted,
@@ -213,6 +263,7 @@ const styles = StyleSheet.create({
   locationRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    flexShrink: 1,
   },
   locationPin: {
     fontSize: 11,
@@ -222,6 +273,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '500',
     color: Colors.light.textMuted,
+    flexShrink: 1,
   },
   itemDescription: {
     fontSize: 13,

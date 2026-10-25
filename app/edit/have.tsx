@@ -11,6 +11,7 @@ import {
   Alert,
   ActivityIndicator,
   Image,
+  Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Stack, useRouter, useLocalSearchParams } from 'expo-router';
@@ -18,7 +19,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { decode } from 'base64-arraybuffer';
 import { Colors } from '../../src/constants/colors';
 import { Spacing, BorderRadius } from '../../src/constants/layout';
-import { ListingCategory } from '../../src/types/listing';
+import { ListingCategory, RentalUnit } from '../../src/types/listing';
 import { useAuth } from '../../src/context/AuthContext';
 import { useMarketplace } from '../../src/context/MarketplaceContext';
 import { supabase } from '../../src/lib/supabase';
@@ -64,6 +65,8 @@ export default function EditHaveScreen() {
   const [category, setCategory] = useState<Category>(null);
   const [mode, setMode] = useState<Mode>(null);
   const [price, setPrice] = useState('');
+  const [rentalUnit, setRentalUnit] = useState<RentalUnit>('day');
+  const [unitModalVisible, setUnitModalVisible] = useState(false);
   const [description, setDescription] = useState('');
   const [hostel, setHostel] = useState<Hostel>(null);
   const [selectedHostels, setSelectedHostels] = useState<string[]>([]); // [] = Everyone
@@ -115,6 +118,9 @@ export default function EditHaveScreen() {
         if (data.listing_type === 'rent') loadedMode = 'RENT';
         else if (data.listing_type === 'give') loadedMode = 'FREE';
         setMode(loadedMode);
+
+        const loadedRentalUnit: RentalUnit = data.rental_unit === 'hour' ? 'hour' : 'day';
+        setRentalUnit(loadedRentalUnit);
 
         setPrice(data.price != null ? String(data.price) : '');
         setDescription(data.description || '');
@@ -351,6 +357,7 @@ export default function EditHaveScreen() {
         mode === 'RENT' ? 'rent' : mode === 'SELL' ? 'sell' : 'give';
       const numericPrice =
         mode === 'FREE' || !price.trim() ? null : Number(price.trim());
+      const rentalUnitValue = mode === 'RENT' ? rentalUnit : null;
 
       const { error } = await supabase
         .from('listings')
@@ -359,6 +366,7 @@ export default function EditHaveScreen() {
           category: category as string,
           listing_type: listingType,
           price: numericPrice,
+          rental_unit: rentalUnitValue,
           description: description.trim(),
           hostel: hostel as string,
           visibility: selectedHostels.length === 0 ? 'Everyone' : selectedHostels.join(', '),
@@ -548,7 +556,7 @@ export default function EditHaveScreen() {
           {mode !== null && mode !== 'FREE' && (
             <View style={styles.fieldGroup}>
               <FieldLabel
-                text={mode === 'RENT' ? 'Price per day' : 'Selling Price'}
+                text={mode === 'RENT' ? 'Rental Price' : 'Selling Price'}
                 required
               />
               <View style={[styles.priceRow, errors.price && styles.inputError]}>
@@ -567,7 +575,21 @@ export default function EditHaveScreen() {
                   maxLength={6}
                 />
                 {mode === 'RENT' && (
-                  <Text style={styles.priceSuffix}>/ day</Text>
+                  <View style={styles.rentalUnitContainer}>
+                    <Text style={styles.perLabel}>per</Text>
+                    <TouchableOpacity
+                      style={styles.rentalUnitDropdown}
+                      onPress={() => setUnitModalVisible(true)}
+                      activeOpacity={0.7}
+                      accessibilityRole="button"
+                      accessibilityLabel="Select rental pricing unit"
+                    >
+                      <Text style={styles.rentalUnitText}>
+                        {rentalUnit === 'hour' ? 'Hour' : 'Day'}
+                      </Text>
+                      <Text style={styles.rentalUnitArrow}>▼</Text>
+                    </TouchableOpacity>
+                  </View>
                 )}
               </View>
               {errors.price && <ErrorText text={errors.price} />}
@@ -751,6 +773,93 @@ export default function EditHaveScreen() {
           <View style={{ height: 32 }} />
         </ScrollView>
       </KeyboardAvoidingView>
+
+      {/* Rental Unit Dropdown Modal */}
+      <Modal
+        visible={unitModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setUnitModalVisible(false)}
+      >
+        <TouchableOpacity
+          style={styles.unitModalOverlay}
+          activeOpacity={1}
+          onPress={() => setUnitModalVisible(false)}
+        >
+          <View style={styles.unitModalContent}>
+            <View style={styles.unitModalHeader}>
+              <Text style={styles.unitModalTitle}>Rental Pricing Unit</Text>
+              <Text style={styles.unitModalSubtitle}>Charge borrowers per day or per hour</Text>
+            </View>
+
+            <TouchableOpacity
+              style={[
+                styles.unitModalOption,
+                rentalUnit === 'day' && styles.unitModalOptionActive,
+              ]}
+              onPress={() => {
+                setRentalUnit('day');
+                setUnitModalVisible(false);
+              }}
+              activeOpacity={0.7}
+            >
+              <View style={styles.unitModalOptionTextCol}>
+                <Text
+                  style={[
+                    styles.unitModalOptionTitle,
+                    rentalUnit === 'day' && styles.unitModalOptionTitleActive,
+                  ]}
+                >
+                  📅  Day
+                </Text>
+                <Text style={styles.unitModalOptionDesc}>
+                  Standard daily rental (default)
+                </Text>
+              </View>
+              {rentalUnit === 'day' && (
+                <Text style={styles.unitModalCheckmark}>✓</Text>
+              )}
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[
+                styles.unitModalOption,
+                rentalUnit === 'hour' && styles.unitModalOptionActive,
+              ]}
+              onPress={() => {
+                setRentalUnit('hour');
+                setUnitModalVisible(false);
+              }}
+              activeOpacity={0.7}
+            >
+              <View style={styles.unitModalOptionTextCol}>
+                <Text
+                  style={[
+                    styles.unitModalOptionTitle,
+                    rentalUnit === 'hour' && styles.unitModalOptionTitleActive,
+                  ]}
+                >
+                  ⏱️  Hour
+                </Text>
+                <Text style={styles.unitModalOptionDesc}>
+                  Hourly rental for calculators, gear, cycles
+                </Text>
+              </View>
+              {rentalUnit === 'hour' && (
+                <Text style={styles.unitModalCheckmark}>✓</Text>
+              )}
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.unitModalCancelButton}
+              onPress={() => setUnitModalVisible(false)}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.unitModalCancelText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -959,11 +1068,119 @@ const styles = StyleSheet.create({
     color: '#0F172A',
     paddingVertical: 12,
   },
-  priceSuffix: {
+  rentalUnitContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingLeft: 4,
+  },
+  perLabel: {
     fontSize: 13,
-    color: '#94A3B8',
-    fontWeight: '500',
-    marginLeft: 4,
+    color: '#64748B',
+    fontWeight: '600',
+  },
+  rentalUnitDropdown: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: '#F1F5F9',
+    borderWidth: 1,
+    borderColor: '#CBD5E1',
+    borderRadius: BorderRadius.sm,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  rentalUnitText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#0F172A',
+  },
+  rentalUnitArrow: {
+    fontSize: 9,
+    color: '#64748B',
+  },
+  unitModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(15, 23, 42, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: Spacing.lg,
+  },
+  unitModalContent: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: BorderRadius.xl,
+    padding: Spacing.lg,
+    width: '100%',
+    maxWidth: 340,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.15,
+    shadowRadius: 16,
+    elevation: 8,
+  },
+  unitModalHeader: {
+    marginBottom: 16,
+  },
+  unitModalTitle: {
+    fontSize: 17,
+    fontWeight: '700',
+    color: '#0F172A',
+    marginBottom: 3,
+  },
+  unitModalSubtitle: {
+    fontSize: 12,
+    color: '#64748B',
+  },
+  unitModalOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: BorderRadius.md,
+    borderWidth: 1.5,
+    borderColor: '#E2E8F0',
+    backgroundColor: '#F8FAFC',
+    marginBottom: 10,
+  },
+  unitModalOptionActive: {
+    borderColor: Colors.light.primary,
+    backgroundColor: '#EFF6FF',
+  },
+  unitModalOptionTextCol: {
+    flex: 1,
+  },
+  unitModalOptionTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#1E293B',
+    marginBottom: 2,
+  },
+  unitModalOptionTitleActive: {
+    color: Colors.light.primary,
+  },
+  unitModalOptionDesc: {
+    fontSize: 11,
+    color: '#64748B',
+  },
+  unitModalCheckmark: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: Colors.light.primary,
+    marginLeft: 8,
+  },
+  unitModalCancelButton: {
+    marginTop: 4,
+    paddingVertical: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: BorderRadius.md,
+    backgroundColor: '#F1F5F9',
+  },
+  unitModalCancelText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#475569',
   },
 
   // Photo Action Buttons

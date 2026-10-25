@@ -461,6 +461,34 @@ export default function ChatScreen() {
             </View>
           )}
 
+          {/* Inactive Item Status Banner in Chat */}
+          {convoDetails?.itemStatus && convoDetails.itemStatus !== 'active' && (
+            <TouchableOpacity
+              style={styles.itemStatusBanner}
+              activeOpacity={0.8}
+              onPress={() => {
+                if (convoDetails.listingId) {
+                  router.push(`/listing/${convoDetails.listingId}`);
+                } else if (convoDetails.requestId) {
+                  router.push(`/request/${convoDetails.requestId}`);
+                }
+              }}
+            >
+              <Text style={styles.itemStatusBannerText} numberOfLines={1}>
+                {convoDetails.itemStatus === 'rented'
+                  ? '🟠 Item is currently rented out.'
+                  : convoDetails.itemStatus === 'sold'
+                    ? '🟣 Item has been sold.'
+                    : convoDetails.itemStatus === 'given'
+                      ? '🔵 Item has been given away.'
+                      : convoDetails.itemStatus === 'fulfilled'
+                        ? '✅ Request has been fulfilled.'
+                        : '⚪ Post has been cancelled.'}
+              </Text>
+              <Text style={styles.itemStatusBannerAction}>View Details ›</Text>
+            </TouchableOpacity>
+          )}
+
           {isLoading ? (
             <View style={styles.centerContainer}>
               <ActivityIndicator size="large" color={Colors.light.primary} />
@@ -855,5 +883,29 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 12,
     fontWeight: '700',
+  },
+
+  // Item status banner
+  itemStatusBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#FFFBEB',
+    paddingHorizontal: Spacing.md,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#FDE68A',
+  },
+  itemStatusBannerText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#92400E',
+    flex: 1,
+  },
+  itemStatusBannerAction: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: Colors.light.primary,
+    marginLeft: 8,
   },
 });

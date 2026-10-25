@@ -102,6 +102,8 @@ export interface ConversationDetails {
   listingId: string | null;
   requestId: string | null;
   title: string | null;
+  itemStatus?: string | null;
+  itemType?: string | null;
   otherUser: {
     id: string;
     name: string;
@@ -125,8 +127,8 @@ export async function fetchConversationDetails(
         id,
         listing_id,
         request_id,
-        listings (id, title),
-        requests (id, title)
+        listings (id, title, status, listing_type),
+        requests (id, title, status)
       `)
       .eq('id', conversationId)
       .single();
@@ -167,12 +169,23 @@ export async function fetchConversationDetails(
     }
 
     let title: string | null = null;
+    let itemStatus: string | null = null;
+    let itemType: string | null = null;
+
     if (convo.listings) {
       const l = Array.isArray(convo.listings) ? convo.listings[0] : convo.listings;
-      if (l) title = l.title;
+      if (l) {
+        title = l.title;
+        itemStatus = l.status;
+        itemType = l.listing_type;
+      }
     } else if (convo.requests) {
       const r = Array.isArray(convo.requests) ? convo.requests[0] : convo.requests;
-      if (r) title = r.title;
+      if (r) {
+        title = r.title;
+        itemStatus = r.status;
+        itemType = 'request';
+      }
     }
 
     return {
@@ -181,6 +194,8 @@ export async function fetchConversationDetails(
         listingId: convo.listing_id,
         requestId: convo.request_id,
         title,
+        itemStatus,
+        itemType,
         otherUser,
       },
       error: null,

@@ -123,6 +123,8 @@ export function isItemVisibleToUser(
 interface MarketplaceContextValue {
   listings: Listing[];
   requests: RequestItem[];
+  myListings: Listing[];
+  myRequests: RequestItem[];
   isLoading: boolean;
   error: string | null;
   refresh: () => Promise<void>;
@@ -143,6 +145,8 @@ const MarketplaceContext = createContext<MarketplaceContextValue | undefined>(un
 export function MarketplaceProvider({ children }: { children: ReactNode }) {
   const [listings, setListings] = useState<Listing[]>([]);
   const [requests, setRequests] = useState<RequestItem[]>([]);
+  const [myListings, setMyListings] = useState<Listing[]>([]);
+  const [myRequests, setMyRequests] = useState<RequestItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -179,10 +183,11 @@ export function MarketplaceProvider({ children }: { children: ReactNode }) {
       }
 
       // Fetch active listings joined with owner profile (marketplace-safe fields only)
-      const [listingsResult, requestsResult] = await Promise.all([
+      // Simultaneously fetch the authenticated user's own listings and requests (all statuses: active, rented, sold, etc.)
+      const publicFetches = Promise.all([
         supabase
           .from('listings')
-          .select('*, profiles(id, name, branch, hostel, avatar_url, verified)')
+          .select('*, profiles!listings_user_id_fkey(id, name, branch, hostel, avatar_url, verified)')
           .eq('status', 'active')
           .order('created_at', { ascending: false }),
         supabase
@@ -191,6 +196,24 @@ export function MarketplaceProvider({ children }: { children: ReactNode }) {
           .eq('status', 'active')
           .order('created_at', { ascending: false }),
       ]);
+
+      const userFetches = user
+        ? Promise.all([
+            supabase
+              .from('listings')
+              .select('*, profiles!listings_user_id_fkey(id, name, branch, hostel, avatar_url, verified)')
+              .eq('user_id', user.id)
+              .order('created_at', { ascending: false }),
+            supabase
+              .from('requests')
+              .select('*, profiles(id, name, branch, hostel, avatar_url, verified)')
+              .eq('user_id', user.id)
+              .order('created_at', { ascending: false }),
+          ])
+        : Promise.resolve([null, null]);
+
+      const [[listingsResult, requestsResult], [userListingsRes, userRequestsRes]] =
+        await Promise.all([publicFetches, userFetches]);
 
       if (listingsResult.error) {
         console.warn('[MarketplaceContext] listings fetch error:', listingsResult.error.message);
@@ -212,6 +235,23 @@ export function MarketplaceProvider({ children }: { children: ReactNode }) {
           .filter((r) => isItemVisibleToUser(r, user?.id, currentUserHostel))
           .map(dbRequestToRequestItem);
         setRequests(mapped);
+      }
+
+      // Populate current user's posts (all statuses)
+      if (userListingsRes && userListingsRes.data) {
+        setMyListings(
+          (userListingsRes.data as DbListingWithOwner[]).map(dbListingToListing)
+        );
+      } else if (!user) {
+        setMyListings([]);
+      }
+
+      if (userRequestsRes && userRequestsRes.data) {
+        setMyRequests(
+          (userRequestsRes.data as DbRequestWithOwner[]).map(dbRequestToRequestItem)
+        );
+      } else if (!user) {
+        setMyRequests([]);
       }
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Unknown error';
@@ -266,6 +306,7 @@ export function MarketplaceProvider({ children }: { children: ReactNode }) {
 
       // Immediately remove from context state
       setListings((prev) => prev.filter((item) => item.id !== id));
+      setMyListings((prev) => prev.filter((item) => item.id !== id));
       return { error: null };
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Unknown delete error';
@@ -287,6 +328,7 @@ export function MarketplaceProvider({ children }: { children: ReactNode }) {
 
       // Immediately remove from context state
       setRequests((prev) => prev.filter((item) => item.id !== id));
+      setMyRequests((prev) => prev.filter((item) => item.id !== id));
       return { error: null };
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Unknown delete error';
@@ -303,6 +345,8 @@ export function MarketplaceProvider({ children }: { children: ReactNode }) {
       value={{
         listings,
         requests,
+        myListings,
+        myRequests,
         isLoading,
         error,
         refresh: fetchFeed,

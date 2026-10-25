@@ -16,12 +16,15 @@ import { useMarketplace } from '../../src/context/MarketplaceContext';
 import { Colors } from '../../src/constants/colors';
 import { Spacing, BorderRadius } from '../../src/constants/layout';
 import { ItemMode, Listing, ListingCategory } from '../../src/types/listing';
+import { DbListingStatus } from '../../src/types/databaseListing';
 import { supabase } from '../../src/lib/supabase';
 import { useAuth } from '../../src/context/AuthContext';
 import { getOrCreateListingConversation } from '../../src/services/chatService';
+import { updateListingStatus } from '../../src/services/listingService';
 import { blockUser, unblockUser, checkBlockStatus } from '../../src/services/safetyService';
 import { BlockStatus } from '../../src/types/safety';
 import ReportModal from '../../src/components/ReportModal';
+import StatusConfirmModal from '../../src/components/StatusConfirmModal';
 
 const CATEGORY_ICONS: Record<string, string> = {
   Books: '📚',
@@ -74,13 +77,31 @@ export default function ListingDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
 
-  const { listings, refresh: refreshMarketplace } = useMarketplace();
+  const { listings, refresh: refreshMarketplace, deleteListing } = useMarketplace();
   const { user } = useAuth();
   const localListing = listings.find((item) => item.id === id);
 
   const [dbListing, setDbListing] = useState<Listing | null>(null);
   const [isLoadingDb, setIsLoadingDb] = useState<boolean>(!localListing && !!id);
   const [isStartingChat, setIsStartingChat] = useState<boolean>(false);
+  const [isUpdatingStatus, setIsUpdatingStatus] = useState<boolean>(false);
+
+  // Status confirm modal state
+  const [confirmModal, setConfirmModal] = useState<{
+    visible: boolean;
+    title: string;
+    message: string;
+    confirmLabel: string;
+    confirmColor?: string;
+    icon?: string;
+    targetStatus: DbListingStatus;
+  }>({
+    visible: false,
+    title: '',
+    message: '',
+    confirmLabel: '',
+    targetStatus: 'active',
+  });
 
   // Safety state
   const [blockStatus, setBlockStatus] = useState<BlockStatus>({
@@ -115,7 +136,7 @@ export default function ListingDetailScreen() {
       try {
         const { data, error } = await supabase
           .from('listings')
-          .select('*, profiles(id, name, branch, hostel, avatar_url, verified)')
+          .select('*, profiles!listings_user_id_fkey(id, name, branch, hostel, avatar_url, verified)')
           .eq('id', id)
           .single();
 
@@ -155,11 +176,12 @@ export default function ListingDetailScreen() {
           give: 'FREE',
         };
         const mode = modeMap[data.listing_type] || 'SELL';
+        const rentalUnit = data.rental_unit === 'hour' ? 'hour' : 'day';
         const priceDisplay =
           mode === 'FREE'
             ? 'Free'
             : mode === 'RENT'
-              ? `₹${data.price ?? 0} / day`
+              ? `₹${data.price ?? 0} / ${rentalUnit}`
               : `₹${data.price ?? 0}`;
 
         const ownerName = ownerProfile?.name || localListing?.ownerName || 'Campus User';
@@ -175,11 +197,16 @@ export default function ListingDetailScreen() {
           category: data.category as Exclude<ListingCategory, 'All'>,
           mode,
           price: priceDisplay,
+          rawPrice: data.price,
+          rentalUnit,
           hostel: data.hostel,
           description: data.description,
           icon: CATEGORY_ICONS[data.category] || '📦',
           timeAgo: formatTimeAgo(data.created_at),
           image_url: data.image_url ?? null,
+          status: (data.status as DbListingStatus) || 'active',
+          rentedToUserId: data.rented_to_user_id ?? null,
+          rentedAt: data.rented_at ?? null,
           ownerName,
           ownerBranch,
           ownerHostel,
@@ -245,6 +272,120 @@ export default function ListingDetailScreen() {
     );
   }
 
+  const isOwner = !!(user?.id && listing?.user_id && user.id === listing.user_id);
+
+  // Status Action Triggers
+  const handlePromptMarkRented = () => {
+    setConfirmModal({
+      visible: true,
+      title: 'Mark this item as rented?',
+      message:
+        'This will temporarily remove it from the marketplace. You can make it available again when it is returned.',
+      confirmLabel: 'Mark as Rented',
+      confirmColor: '#EA580C',
+      icon: '📦',
+      targetStatus: 'rented',
+    });
+  };
+
+  const handlePromptMarkAvailable = () => {
+    setConfirmModal({
+      visible: true,
+      title: 'Mark this item as available?',
+      message: 'The item will appear in the marketplace again.',
+      confirmLabel: 'Mark Available',
+      confirmColor: '#16A34A',
+      icon: '🔄',
+      targetStatus: 'active',
+    });
+  };
+
+  const handlePromptMarkSold = () => {
+    setConfirmModal({
+      visible: true,
+      title: 'Mark this item as sold?',
+      message:
+        'This will remove the item from the marketplace. It will remain in your history.',
+      confirmLabel: 'Mark as Sold',
+      confirmColor: '#9333EA',
+      icon: '🏷️',
+      targetStatus: 'sold',
+    });
+  };
+
+  const handlePromptMarkGiven = () => {
+    setConfirmModal({
+      visible: true,
+      title: 'Mark this item as given?',
+      message:
+        'This will remove the item from the marketplace. It will remain in your history.',
+      confirmLabel: 'Mark as Given',
+      confirmColor: '#059669',
+      icon: '🎁',
+      targetStatus: 'given',
+    });
+  };
+
+  const handlePromptCancelListing = () => {
+    setConfirmModal({
+      visible: true,
+      title: 'Cancel this listing?',
+      message: 'This will cancel the listing and remove it from the active marketplace.',
+      confirmLabel: 'Cancel Listing',
+      confirmColor: '#DC2626',
+      icon: '🚫',
+      targetStatus: 'cancelled',
+    });
+  };
+
+  const handleConfirmStatusChange = async () => {
+    if (!listing?.id || isUpdatingStatus) return;
+    try {
+      setIsUpdatingStatus(true);
+      const { data: updated, error } = await updateListingStatus(
+        listing.id,
+        confirmModal.targetStatus
+      );
+
+      if (error || !updated) {
+        Alert.alert('Status Error', error?.message || 'Failed to update listing status.');
+        return;
+      }
+
+      setDbListing(updated);
+      setConfirmModal((prev) => ({ ...prev, visible: false }));
+      await refreshMarketplace();
+    } catch (err: any) {
+      Alert.alert('Error', err?.message || 'An unexpected error occurred.');
+    } finally {
+      setIsUpdatingStatus(false);
+    }
+  };
+
+  const handleDeleteListing = () => {
+    if (!listing?.id) return;
+    Alert.alert(
+      'Delete Listing',
+      'Are you sure you want to permanently delete this listing? This action cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            const { error } = await deleteListing(listing.id, listing.image_url);
+            if (error) {
+              Alert.alert('Delete Failed', error.message);
+            } else {
+              await refreshMarketplace();
+              router.back();
+            }
+          },
+        },
+      ]
+    );
+  };
+
   const renderModeBadge = (mode: ItemMode) => {
     switch (mode) {
       case 'RENT':
@@ -266,6 +407,88 @@ export default function ListingDetailScreen() {
           </View>
         );
     }
+  };
+
+  const renderStatusBadge = () => {
+    if (!listing) return null;
+    const isOwnerListing = user?.id === listing.user_id;
+
+    if (listing.status === 'rented') {
+      return (
+        <View style={[styles.badge, styles.badgeStatusRented]}>
+          <Text style={styles.badgeStatusRentedText}>CURRENTLY RENTED</Text>
+        </View>
+      );
+    }
+    if (listing.status === 'sold') {
+      return (
+        <View style={[styles.badge, styles.badgeStatusSold]}>
+          <Text style={styles.badgeStatusSoldText}>SOLD</Text>
+        </View>
+      );
+    }
+    if (listing.status === 'given') {
+      return (
+        <View style={[styles.badge, styles.badgeStatusGiven]}>
+          <Text style={styles.badgeStatusGivenText}>GIVEN</Text>
+        </View>
+      );
+    }
+    if (listing.status === 'cancelled') {
+      return (
+        <View style={[styles.badge, styles.badgeStatusCancelled]}>
+          <Text style={styles.badgeStatusCancelledText}>CANCELLED</Text>
+        </View>
+      );
+    }
+    if (isOwnerListing && listing.status === 'active') {
+      return (
+        <View style={[styles.badge, styles.badgeStatusAvailable]}>
+          <Text style={styles.badgeStatusAvailableText}>AVAILABLE</Text>
+        </View>
+      );
+    }
+    return null;
+  };
+
+  const renderInactiveStatusBanner = () => {
+    if (!listing || listing.status === 'active') return null;
+
+    let bannerBg = '#FFF7ED';
+    let bannerBorder = '#FED7AA';
+    let bannerTitle = 'Currently Rented';
+    let bannerDesc = 'This item is currently rented out and temporarily unavailable.';
+    let bannerIcon = '🟠';
+
+    if (listing.status === 'sold') {
+      bannerBg = '#FDF2F8';
+      bannerBorder = '#FBCFE8';
+      bannerTitle = 'Sold — No longer available';
+      bannerDesc = 'This item has been purchased and is no longer available.';
+      bannerIcon = '🟣';
+    } else if (listing.status === 'given') {
+      bannerBg = '#F0FDF4';
+      bannerBorder = '#BBF7D0';
+      bannerTitle = 'Given — No longer available';
+      bannerDesc = 'This item has been given away and is no longer available.';
+      bannerIcon = '🔵';
+    } else if (listing.status === 'cancelled') {
+      bannerBg = '#F8FAFC';
+      bannerBorder = '#E2E8F0';
+      bannerTitle = 'Listing Cancelled';
+      bannerDesc = 'This listing was cancelled by the owner.';
+      bannerIcon = '⚪';
+    }
+
+    return (
+      <View style={[styles.inactiveBanner, { backgroundColor: bannerBg, borderColor: bannerBorder }]}>
+        <Text style={styles.inactiveBannerIcon}>{bannerIcon}</Text>
+        <View style={styles.inactiveBannerTextCol}>
+          <Text style={styles.inactiveBannerTitle}>{bannerTitle}</Text>
+          <Text style={styles.inactiveBannerDesc}>{bannerDesc}</Text>
+        </View>
+      </View>
+    );
   };
 
   const confirmBlockSeller = (sellerId: string, sellerName: string) => {
@@ -426,9 +649,14 @@ export default function ListingDetailScreen() {
           </View>
         )}
 
+        {renderInactiveStatusBanner()}
+
         <View style={styles.headerSection}>
           <View style={styles.badgeRow}>
-            {renderModeBadge(listing.mode)}
+            <View style={styles.badgeGroup}>
+              {renderModeBadge(listing.mode)}
+              {renderStatusBadge()}
+            </View>
             <Text style={styles.timeAgo}>Posted {listing.timeAgo}</Text>
           </View>
           <Text style={styles.title}>{listing.title}</Text>
@@ -493,29 +721,137 @@ export default function ListingDetailScreen() {
           </View>
         </View>
 
-        <View style={{ height: 100 }} />
+        <View style={{ height: 120 }} />
       </ScrollView>
 
-      <View style={styles.bottomBar}>
-        <TouchableOpacity
-          style={[
-            styles.actionButton,
-            styles.chatButton,
-            (isStartingChat || blockStatus.isBidirectional) && { opacity: 0.6 },
-          ]}
-          activeOpacity={0.8}
-          onPress={handleChat}
-          disabled={isStartingChat || blockStatus.isBidirectional}
-        >
-          {isStartingChat ? (
-            <ActivityIndicator size="small" color="#FFFFFF" />
-          ) : (
-            <Text style={styles.chatButtonText}>
-              {blockStatus.isBidirectional ? '🚫  Seller is Blocked' : '💬  Chat with Seller'}
-            </Text>
+      {/* Bottom Action Bar */}
+      {isOwner ? (
+        <View style={styles.ownerBottomBarContainer}>
+          {/* Primary Owner Lifecycle CTA */}
+          {listing.mode === 'RENT' && listing.status === 'active' && (
+            <TouchableOpacity
+              style={[styles.ownerPrimaryButton, styles.primaryRentedButton]}
+              onPress={handlePromptMarkRented}
+              activeOpacity={0.8}
+              disabled={isUpdatingStatus}
+            >
+              <Text style={styles.primaryButtonText}>📦  Mark as Rented</Text>
+            </TouchableOpacity>
           )}
-        </TouchableOpacity>
-      </View>
+
+          {listing.mode === 'RENT' && listing.status === 'rented' && (
+            <TouchableOpacity
+              style={[styles.ownerPrimaryButton, styles.primaryAvailableButton]}
+              onPress={handlePromptMarkAvailable}
+              activeOpacity={0.8}
+              disabled={isUpdatingStatus}
+            >
+              <Text style={styles.primaryButtonText}>🔄  Mark as Available</Text>
+            </TouchableOpacity>
+          )}
+
+          {listing.mode === 'SELL' && listing.status === 'active' && (
+            <TouchableOpacity
+              style={[styles.ownerPrimaryButton, styles.primarySoldButton]}
+              onPress={handlePromptMarkSold}
+              activeOpacity={0.8}
+              disabled={isUpdatingStatus}
+            >
+              <Text style={styles.primaryButtonText}>🏷️  Mark as Sold</Text>
+            </TouchableOpacity>
+          )}
+
+          {listing.mode === 'FREE' && listing.status === 'active' && (
+            <TouchableOpacity
+              style={[styles.ownerPrimaryButton, styles.primaryGivenButton]}
+              onPress={handlePromptMarkGiven}
+              activeOpacity={0.8}
+              disabled={isUpdatingStatus}
+            >
+              <Text style={styles.primaryButtonText}>🎁  Mark as Given</Text>
+            </TouchableOpacity>
+          )}
+
+          {/* Secondary Owner Controls: Edit, Cancel, Delete */}
+          <View style={styles.ownerSecondaryRow}>
+            <TouchableOpacity
+              style={styles.secondaryButton}
+              onPress={() => router.push(`/edit/have?id=${listing.id}`)}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.secondaryButtonText}>✏️ Edit</Text>
+            </TouchableOpacity>
+
+            {listing.status === 'active' && (
+              <TouchableOpacity
+                style={styles.secondaryButton}
+                onPress={handlePromptCancelListing}
+                activeOpacity={0.8}
+                disabled={isUpdatingStatus}
+              >
+                <Text style={[styles.secondaryButtonText, { color: '#DC2626' }]}>🚫 Cancel</Text>
+              </TouchableOpacity>
+            )}
+
+            <TouchableOpacity
+              style={styles.secondaryButton}
+              onPress={handleDeleteListing}
+              activeOpacity={0.8}
+              disabled={isUpdatingStatus}
+            >
+              <Text style={[styles.secondaryButtonText, { color: '#DC2626' }]}>🗑️ Delete</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      ) : (
+        <View style={styles.bottomBar}>
+          {listing.status === 'active' ? (
+            <TouchableOpacity
+              style={[
+                styles.actionButton,
+                styles.chatButton,
+                (isStartingChat || blockStatus.isBidirectional) && { opacity: 0.6 },
+              ]}
+              activeOpacity={0.8}
+              onPress={handleChat}
+              disabled={isStartingChat || blockStatus.isBidirectional}
+            >
+              {isStartingChat ? (
+                <ActivityIndicator size="small" color="#FFFFFF" />
+              ) : (
+                <Text style={styles.chatButtonText}>
+                  {blockStatus.isBidirectional ? '🚫  Seller is Blocked' : '💬  Chat with Seller'}
+                </Text>
+              )}
+            </TouchableOpacity>
+          ) : (
+            <View style={[styles.actionButton, styles.disabledButton]}>
+              <Text style={styles.disabledButtonText}>
+                {listing.status === 'rented'
+                  ? '🔒  Item is Currently Rented'
+                  : listing.status === 'sold'
+                    ? '🔒  Sold — No Longer Available'
+                    : listing.status === 'given'
+                      ? '🔒  Given — No Longer Available'
+                      : '🔒  Listing Cancelled'}
+              </Text>
+            </View>
+          )}
+        </View>
+      )}
+
+      {/* Status Confirmation Modal */}
+      <StatusConfirmModal
+        visible={confirmModal.visible}
+        title={confirmModal.title}
+        message={confirmModal.message}
+        confirmLabel={confirmModal.confirmLabel}
+        confirmColor={confirmModal.confirmColor}
+        icon={confirmModal.icon}
+        isLoading={isUpdatingStatus}
+        onConfirm={handleConfirmStatusChange}
+        onCancel={() => setConfirmModal((prev) => ({ ...prev, visible: false }))}
+      />
 
       {/* Safety Action Sheet Modal */}
       <Modal
@@ -673,6 +1009,11 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginBottom: 10,
   },
+  badgeGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
   badge: {
     paddingHorizontal: 10,
     paddingVertical: 4,
@@ -684,6 +1025,130 @@ const styles = StyleSheet.create({
   badgeSellText: { fontSize: 11, fontWeight: '700', color: '#047857', letterSpacing: 0.5 },
   badgeFree: { backgroundColor: '#FAF5FF' },
   badgeFreeText: { fontSize: 11, fontWeight: '700', color: '#7E22CE', letterSpacing: 0.5 },
+  badgeStatusRented: { backgroundColor: '#FFF7ED', borderWidth: 1, borderColor: '#FED7AA' },
+  badgeStatusRentedText: { fontSize: 10, fontWeight: '700', color: '#C2410C', letterSpacing: 0.5 },
+  badgeStatusSold: { backgroundColor: '#FDF2F8', borderWidth: 1, borderColor: '#FBCFE8' },
+  badgeStatusSoldText: { fontSize: 10, fontWeight: '700', color: '#BE185D', letterSpacing: 0.5 },
+  badgeStatusGiven: { backgroundColor: '#F0FDF4', borderWidth: 1, borderColor: '#BBF7D0' },
+  badgeStatusGivenText: { fontSize: 10, fontWeight: '700', color: '#15803D', letterSpacing: 0.5 },
+  badgeStatusCancelled: { backgroundColor: '#F1F5F9', borderWidth: 1, borderColor: '#E2E8F0' },
+  badgeStatusCancelledText: { fontSize: 10, fontWeight: '700', color: '#64748B', letterSpacing: 0.5 },
+  badgeStatusAvailable: { backgroundColor: '#ECFDF5', borderWidth: 1, borderColor: '#A7F3D0' },
+  badgeStatusAvailableText: { fontSize: 10, fontWeight: '700', color: '#047857', letterSpacing: 0.5 },
+  inactiveBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: Spacing.md,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+  },
+  inactiveBannerIcon: {
+    fontSize: 22,
+    marginRight: 12,
+  },
+  inactiveBannerTextCol: {
+    flex: 1,
+  },
+  inactiveBannerTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#0F172A',
+    marginBottom: 2,
+  },
+  inactiveBannerDesc: {
+    fontSize: 12,
+    color: '#64748B',
+    lineHeight: 16,
+  },
+  ownerBottomBarContainer: {
+    backgroundColor: '#FFFFFF',
+    borderTopWidth: 1,
+    borderTopColor: '#E2E8F0',
+    paddingHorizontal: Spacing.md,
+    paddingTop: 12,
+    paddingBottom: 16,
+    gap: 10,
+  },
+  ownerPrimaryButton: {
+    width: '100%',
+    minHeight: 50,
+    paddingVertical: 14,
+    paddingHorizontal: Spacing.md,
+    borderRadius: BorderRadius.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+  },
+  primaryRentedButton: {
+    backgroundColor: '#EA580C',
+    shadowColor: '#EA580C',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 6,
+    elevation: 3,
+  },
+  primaryAvailableButton: {
+    backgroundColor: '#16A34A',
+    shadowColor: '#16A34A',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 6,
+    elevation: 3,
+  },
+  primarySoldButton: {
+    backgroundColor: '#9333EA',
+    shadowColor: '#9333EA',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 6,
+    elevation: 3,
+  },
+  primaryGivenButton: {
+    backgroundColor: '#059669',
+    shadowColor: '#059669',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 6,
+    elevation: 3,
+  },
+  primaryButtonText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    textAlign: 'center',
+    includeFontPadding: false,
+    zIndex: 2,
+  },
+  ownerSecondaryRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  secondaryButton: {
+    flex: 1,
+    height: 40,
+    borderRadius: BorderRadius.md,
+    backgroundColor: '#F1F5F9',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  secondaryButtonText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#334155',
+  },
+  disabledButton: {
+    backgroundColor: '#F1F5F9',
+    borderWidth: 1,
+    borderColor: '#CBD5E1',
+  },
+  disabledButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#64748B',
+  },
   timeAgo: {
     fontSize: 12,
     color: '#94A3B8',
@@ -823,7 +1288,9 @@ const styles = StyleSheet.create({
   },
   actionButton: {
     flex: 1,
+    minHeight: 48,
     paddingVertical: 14,
+    paddingHorizontal: Spacing.md,
     borderRadius: BorderRadius.md,
     alignItems: 'center',
     justifyContent: 'center',
