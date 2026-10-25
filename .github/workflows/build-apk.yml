@@ -53,9 +53,18 @@ jobs:
           EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
           EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY }}
 
-      # ── 8. Android SDK ───────────────────────────────────────────────────
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+      # ── 8. Android SDK (use pre-installed SDK on ubuntu-latest) ──────────
+      # NOTE: ubuntu-latest already has Android SDK at $ANDROID_HOME.
+      # We skip android-actions/setup-android which conflicts with it.
+      # We just accept licenses and ensure required build tools are present.
+      - name: Accept Android SDK licenses & install build tools
+        run: |
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          # Find sdkmanager — it may be in cmdline-tools/latest or cmdline-tools/12.0
+          SDKMANAGER=$(find $ANDROID_HOME/cmdline-tools -name sdkmanager | head -1)
+          echo "Using sdkmanager: $SDKMANAGER"
+          yes | $SDKMANAGER --licenses || true
+          $SDKMANAGER "platform-tools" "platforms;android-35" "build-tools;35.0.0"
 
       # ── 9. Gradle permissions ────────────────────────────────────────────
       - name: Make gradlew executable
