@@ -205,8 +205,10 @@ export default function RequestDetailScreen() {
               setBlockStatus((prev) => ({
                 ...prev,
                 isBlocked: true,
+                isBlockedBy: prev.isBlockedBy,
                 isBidirectional: true,
               }));
+              refreshMarketplace();
               Alert.alert('User Blocked', `${requesterName} has been blocked.`);
             } catch (e: any) {
               Alert.alert('Block Error', e?.message ?? 'Failed to block user.');
@@ -225,6 +227,7 @@ export default function RequestDetailScreen() {
         { text: 'Cancel', style: 'cancel' },
         {
           text: 'Unblock',
+          style: 'default',
           onPress: async () => {
             try {
               await unblockUser(requesterId);
@@ -233,6 +236,7 @@ export default function RequestDetailScreen() {
                 isBlockedBy: prev.isBlockedBy,
                 isBidirectional: prev.isBlockedBy,
               }));
+              refreshMarketplace();
               Alert.alert('Unblocked', `${requesterName} has been unblocked.`);
             } catch (e: any) {
               Alert.alert('Unblock Error', e?.message ?? 'Failed to unblock.');
@@ -684,6 +688,114 @@ export default function RequestDetailScreen() {
         onCancel={() => setConfirmModal((prev) => ({ ...prev, visible: false }))}
       />
 
+      {/* Safety Action Sheet Modal */}
+      <Modal
+        visible={safetyMenuVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setSafetyMenuVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <TouchableOpacity
+            style={StyleSheet.absoluteFill}
+            activeOpacity={1}
+            onPress={() => setSafetyMenuVisible(false)}
+          />
+          <View style={styles.actionSheetContainer}>
+            <View style={styles.actionSheetHeader}>
+              <Text style={styles.actionSheetTitle}>Safety Options</Text>
+              <Text style={styles.actionSheetSubtitle}>
+                Report or manage this request and requester
+              </Text>
+            </View>
+
+            <View style={styles.actionSheetBody}>
+              {/* Report the request itself */}
+              <TouchableOpacity
+                style={styles.actionSheetOption}
+                activeOpacity={0.7}
+                onPress={() => {
+                  setSafetyMenuVisible(false);
+                  setReportModalConfig({
+                    visible: true,
+                    targetType: 'request',
+                    targetId: request.id,
+                    targetLabel: request.title,
+                  });
+                }}
+              >
+                <Text style={styles.actionSheetOptionIcon}>🚩</Text>
+                <Text style={styles.actionSheetOptionText}>Report Request</Text>
+              </TouchableOpacity>
+
+              <View style={styles.actionSheetDivider} />
+
+              {/* Report the requester as a user */}
+              <TouchableOpacity
+                style={styles.actionSheetOption}
+                activeOpacity={0.7}
+                onPress={() => {
+                  setSafetyMenuVisible(false);
+                  setReportModalConfig({
+                    visible: true,
+                    targetType: 'user',
+                    targetId: request.user_id,
+                    targetLabel: request.requesterName || 'Requester',
+                  });
+                }}
+              >
+                <Text style={styles.actionSheetOptionIcon}>👤</Text>
+                <Text style={styles.actionSheetOptionText}>
+                  Report Requester ({request.requesterName || 'Requester'})
+                </Text>
+              </TouchableOpacity>
+
+              <View style={styles.actionSheetDivider} />
+
+              {/* Block / Unblock the requester */}
+              <TouchableOpacity
+                style={styles.actionSheetOption}
+                activeOpacity={0.7}
+                onPress={() => {
+                  setSafetyMenuVisible(false);
+                  if (blockStatus.isBlocked) {
+                    confirmUnblockRequester(
+                      request.user_id,
+                      request.requesterName || 'Requester'
+                    );
+                  } else {
+                    confirmBlockRequester(
+                      request.user_id,
+                      request.requesterName || 'Requester'
+                    );
+                  }
+                }}
+              >
+                <Text style={styles.actionSheetOptionIcon}>🚫</Text>
+                <Text
+                  style={[
+                    styles.actionSheetOptionText,
+                    !blockStatus.isBlocked && styles.actionSheetDestructiveText,
+                  ]}
+                >
+                  {blockStatus.isBlocked
+                    ? `Unblock Requester (${request.requesterName || 'Requester'})`
+                    : `Block Requester (${request.requesterName || 'Requester'})`}
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            <TouchableOpacity
+              style={styles.actionSheetCancelButton}
+              activeOpacity={0.8}
+              onPress={() => setSafetyMenuVisible(false)}
+            >
+              <Text style={styles.actionSheetCancelText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
       {/* Safety Report Modal */}
       <ReportModal
         visible={reportModalConfig.visible}
@@ -1088,5 +1200,79 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '600',
     color: Colors.light.error,
+  },
+
+  // Safety Action Sheet Modal
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'flex-end',
+  },
+  actionSheetContainer: {
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingBottom: 32,
+    paddingTop: 4,
+  },
+  actionSheetHeader: {
+    paddingHorizontal: Spacing.lg,
+    paddingTop: 20,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F1F5F9',
+  },
+  actionSheetTitle: {
+    fontSize: 17,
+    fontWeight: '700',
+    color: '#0F172A',
+    marginBottom: 4,
+  },
+  actionSheetSubtitle: {
+    fontSize: 13,
+    color: '#64748B',
+  },
+  actionSheetBody: {
+    paddingHorizontal: Spacing.lg,
+    paddingTop: 8,
+  },
+  actionSheetOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 16,
+    gap: 14,
+  },
+  actionSheetOptionIcon: {
+    fontSize: 20,
+    width: 28,
+    textAlign: 'center',
+  },
+  actionSheetOptionText: {
+    fontSize: 15,
+    fontWeight: '500',
+    color: '#1E293B',
+    flex: 1,
+  },
+  actionSheetDestructiveText: {
+    color: '#DC2626',
+    fontWeight: '600',
+  },
+  actionSheetDivider: {
+    height: 1,
+    backgroundColor: '#F1F5F9',
+    marginLeft: 42,
+  },
+  actionSheetCancelButton: {
+    marginHorizontal: Spacing.lg,
+    marginTop: 12,
+    paddingVertical: 15,
+    borderRadius: BorderRadius.md,
+    backgroundColor: '#F1F5F9',
+    alignItems: 'center',
+  },
+  actionSheetCancelText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#475569',
   },
 });
