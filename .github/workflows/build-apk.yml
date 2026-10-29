@@ -6,12 +6,22 @@ on:
       - main
       - master
   workflow_dispatch:
+    inputs:
+      build_type:
+        description: "Build Type"
+        required: true
+        default: "development"
+        type: choice
+        options:
+          - development
+          - release
+          - both
 
 jobs:
   build-apk:
-    name: Build Release APK
+    name: Build Android APK (${{ github.event.inputs.build_type || 'release' }})
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
 
     steps:
       # ── 1. Checkout ──────────────────────────────────────────────────────
@@ -53,14 +63,10 @@ jobs:
           EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
           EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY }}
 
-      # ── 8. Android SDK (use pre-installed SDK on ubuntu-latest) ──────────
-      # NOTE: ubuntu-latest already has Android SDK at $ANDROID_HOME.
-      # We skip android-actions/setup-android which conflicts with it.
-      # We just accept licenses and ensure required build tools are present.
+      # ── 8. Android SDK ────────────────────────────────────────────────────
       - name: Accept Android SDK licenses & install build tools
         run: |
           echo "ANDROID_HOME=$ANDROID_HOME"
-          # Find sdkmanager — it may be in cmdline-tools/latest or cmdline-tools/12.0
           SDKMANAGER=$(find $ANDROID_HOME/cmdline-tools -name sdkmanager | head -1)
           echo "Using sdkmanager: $SDKMANAGER"
           yes | $SDKMANAGER --licenses || true
@@ -70,8 +76,28 @@ jobs:
       - name: Make gradlew executable
         run: chmod +x android/gradlew
 
-      # ── 10. Build Release APK ─────────────────────────────────────────────
+      # ── 10a. Build Development APK ────────────────────────────────────────
+      # Runs when: build_type = development | both | (no input = push to master)
+      - name: Build Development APK (Debug)
+        if: >
+          github.event_name == 'workflow_dispatch' &&
+          (github.event.inputs.build_type == 'development' ||
+           github.event.inputs.build_type == 'both')
+        run: |
+          cd android
+          ./gradlew assembleDebug --no-daemon
+        env:
+          EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
+          EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY }}
+
+      # ── 10b. Build Release APK ────────────────────────────────────────────
+      # Runs when: build_type = release | both | triggered by push (no input)
       - name: Build Release APK
+        if: >
+          github.event_name == 'push' ||
+          (github.event_name == 'workflow_dispatch' &&
+           (github.event.inputs.build_type == 'release' ||
+            github.event.inputs.build_type == 'both'))
         run: |
           cd android
           ./gradlew assembleRelease --no-daemon
@@ -79,20 +105,67 @@ jobs:
           EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
           EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY }}
 
-      # ── 11. Locate APK ────────────────────────────────────────────────────
-      - name: Find APK path
+      # ── 11. Locate & rename APKs ─────────────────────────────────────────
+      - name: Find and rename APKs
         run: |
-          find android/app/build/outputs/apk/ -name "*.apk"
-          echo "APK_PATH=$(find android/app/build/outputs/apk/release -name '*.apk' | head -1)" >> $GITHUB_ENV
+          echo "=== All APK files found ==="
+          find android/app/build/outputs/apk/ -name "*.apk" 2>/dev/null || echo "No APKs built yet"
 
-      # ── 12. Rename APK ────────────────────────────────────────────────────
-      - name: Rename APK
-        run: cp "$APK_PATH" "CampusShare-v${{ github.run_number }}.apk"
+          # Dev APK
+          DEV_APK=$(find android/app/build/outputs/apk/debug -name "*.apk" 2>/dev/null | head -1)
+          if [ -n "$DEV_APK" ]; then
+            cp "$DEV_APK" "CampusShare-Dev-v${{ github.run_number }}.apk"
+            echo "DEV_APK_EXISTS=true" >> $GITHUB_ENV
+            echo "✅ Dev APK: $DEV_APK"
+          else
+            echo "DEV_APK_EXISTS=false" >> $GITHUB_ENV
+          fi
 
-      # ── 13. Upload as downloadable artifact ───────────────────────────────
-      - name: Upload APK artifact
+          # Release APK
+          REL_APK=$(find android/app/build/outputs/apk/release -name "*.apk" 2>/dev/null | head -1)
+          if [ -n "$REL_APK" ]; then
+            cp "$REL_APK" "CampusShare-Release-v${{ github.run_number }}.apk"
+            echo "REL_APK_EXISTS=true" >> $GITHUB_ENV
+            echo "✅ Release APK: $REL_APK"
+          else
+            echo "REL_APK_EXISTS=false" >> $GITHUB_ENV
+          fi
+
+      # ── 12a. Upload Development APK ───────────────────────────────────────
+      - name: Upload Development APK artifact
+        if: env.DEV_APK_EXISTS == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: CampusShare-APK-v${{ github.run_number }}
-          path: CampusShare-v${{ github.run_number }}.apk
+          name: CampusShare-Dev-v${{ github.run_number }}
+          path: CampusShare-Dev-v${{ github.run_number }}.apk
+          retention-days: 14
+
+      # ── 12b. Upload Release APK ───────────────────────────────────────────
+      - name: Upload Release APK artifact
+        if: env.REL_APK_EXISTS == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: CampusShare-Release-v${{ github.run_number }}
+          path: CampusShare-Release-v${{ github.run_number }}.apk
           retention-days: 30
+
+      # ── 13. Build Summary ─────────────────────────────────────────────────
+      - name: Print build summary
+        run: |
+          echo "## ✅ Build Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Type | Status | Artifact |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|--------|----------|" >> $GITHUB_STEP_SUMMARY
+          if [ "$DEV_APK_EXISTS" = "true" ]; then
+            echo "| 🛠️ Development | ✅ Built | \`CampusShare-Dev-v${{ github.run_number }}.apk\` |" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### 📱 Using Your Dev APK" >> $GITHUB_STEP_SUMMARY
+            echo "1. Download \`CampusShare-Dev-v${{ github.run_number }}.apk\` from the Artifacts panel" >> $GITHUB_STEP_SUMMARY
+            echo "2. Install it on your Android phone (once)" >> $GITHUB_STEP_SUMMARY
+            echo "3. On your PC, run: \`npx expo start\`" >> $GITHUB_STEP_SUMMARY
+            echo "4. Scan the QR code or enter your IP — changes will live reload instantly!" >> $GITHUB_STEP_SUMMARY
+            echo "5. Use \`npx expo start --tunnel\` if phone and PC are on different networks" >> $GITHUB_STEP_SUMMARY
+          fi
+          if [ "$REL_APK_EXISTS" = "true" ]; then
+            echo "| 📦 Release | ✅ Built | \`CampusShare-Release-v${{ github.run_number }}.apk\` |" >> $GITHUB_STEP_SUMMARY
+          fi
