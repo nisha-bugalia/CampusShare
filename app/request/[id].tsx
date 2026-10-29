@@ -12,6 +12,7 @@ import {
   Modal,
 } from 'react-native';
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useMarketplace } from '../../src/context/MarketplaceContext';
 import { Colors } from '../../src/constants/colors';
 import { Spacing, BorderRadius } from '../../src/constants/layout';
@@ -32,6 +33,7 @@ import ReportModal from '../../src/components/ReportModal';
 import StatusConfirmModal from '../../src/components/StatusConfirmModal';
 
 export default function RequestDetailScreen() {
+  const insets = useSafeAreaInsets();
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
 
@@ -591,12 +593,12 @@ export default function RequestDetailScreen() {
           </View>
         </View>
 
-        <View style={{ height: 120 }} />
+        <View style={{ height: 120 + insets.bottom }} />
       </ScrollView>
 
       {/* Bottom Action Bar */}
       {isCreator ? (
-        <View style={styles.ownerBottomBarContainer}>
+        <View style={[styles.ownerBottomBarContainer, { paddingBottom: Math.max(insets.bottom, 16) }]}>
           {/* Primary Lifecycle CTA */}
           {request.status === 'active' && (
             <TouchableOpacity
@@ -643,7 +645,7 @@ export default function RequestDetailScreen() {
           </View>
         </View>
       ) : (
-        <View style={styles.bottomBar}>
+        <View style={[styles.bottomBar, { paddingBottom: Math.max(insets.bottom, 14) }]}>
           {request.status === 'active' ? (
             <TouchableOpacity
               style={[

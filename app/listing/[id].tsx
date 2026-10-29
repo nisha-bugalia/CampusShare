@@ -12,6 +12,7 @@ import {
   Modal,
 } from 'react-native';
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useMarketplace } from '../../src/context/MarketplaceContext';
 import { Colors } from '../../src/constants/colors';
 import { Spacing, BorderRadius } from '../../src/constants/layout';
@@ -74,6 +75,7 @@ function ListingImage({ uri, fallbackIcon }: { uri: string; fallbackIcon: string
 }
 
 export default function ListingDetailScreen() {
+  const insets = useSafeAreaInsets();
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
 
@@ -721,12 +723,12 @@ export default function ListingDetailScreen() {
           </View>
         </View>
 
-        <View style={{ height: 120 }} />
+        <View style={{ height: 120 + insets.bottom }} />
       </ScrollView>
 
       {/* Bottom Action Bar */}
       {isOwner ? (
-        <View style={styles.ownerBottomBarContainer}>
+        <View style={[styles.ownerBottomBarContainer, { paddingBottom: Math.max(insets.bottom, 16) }]}>
           {/* Primary Owner Lifecycle CTA */}
           {listing.mode === 'RENT' && listing.status === 'active' && (
             <TouchableOpacity
@@ -804,7 +806,7 @@ export default function ListingDetailScreen() {
           </View>
         </View>
       ) : (
-        <View style={styles.bottomBar}>
+        <View style={[styles.bottomBar, { paddingBottom: Math.max(insets.bottom, 14) }]}>
           {listing.status === 'active' ? (
             <TouchableOpacity
               style={[

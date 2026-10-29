@@ -59,6 +59,7 @@ export default function ChatScreen() {
   const [inputText, setInputText] = useState<string>('');
   const [isSending, setIsSending] = useState<boolean>(false);
   const [keyboardHeight, setKeyboardHeight] = useState<number>(0);
+  const [isKeyboardVisible, setIsKeyboardVisible] = useState<boolean>(false);
 
   const flatListRef = useRef<FlatList<DbMessage>>(null);
 
@@ -76,6 +77,7 @@ export default function ChatScreen() {
       Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow',
       (e) => {
         setKeyboardHeight(e.endCoordinates.height);
+        setIsKeyboardVisible(true);
         setTimeout(() => {
           flatListRef.current?.scrollToEnd({ animated: true });
         }, 50);
@@ -86,6 +88,7 @@ export default function ChatScreen() {
       Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide',
       () => {
         setKeyboardHeight(0);
+        setIsKeyboardVisible(false);
       }
     );
 
@@ -433,12 +436,7 @@ export default function ChatScreen() {
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
       >
-        <View
-          style={[
-            styles.mainContent,
-            Platform.OS === 'android' && { paddingBottom: keyboardHeight },
-          ]}
-        >
+        <View style={styles.mainContent}>
           {/* Blocked user banner */}
           {blockStatus.isBidirectional && (
             <View style={styles.blockedBanner}>
@@ -521,6 +519,7 @@ export default function ChatScreen() {
               onContentSizeChange={handleScrollToEnd}
               onLayout={handleScrollToEnd}
               keyboardShouldPersistTaps="handled"
+              keyboardDismissMode="on-drag"
               ListEmptyComponent={
                 <View style={styles.emptyContainer}>
                   <View style={styles.emptyIconCircle}>
@@ -541,7 +540,7 @@ export default function ChatScreen() {
               styles.composerWrapper,
               {
                 paddingBottom:
-                  Platform.OS === 'android' && keyboardHeight > 0
+                  isKeyboardVisible || keyboardHeight > 0
                     ? 8
                     : Math.max(insets.bottom, 10),
               },
@@ -574,6 +573,12 @@ export default function ChatScreen() {
                   placeholderTextColor="#94A3B8"
                   value={inputText}
                   onChangeText={setInputText}
+                  onFocus={() => {
+                    setIsKeyboardVisible(true);
+                    setTimeout(() => {
+                      flatListRef.current?.scrollToEnd({ animated: true });
+                    }, 50);
+                  }}
                   multiline
                   maxLength={1000}
                   editable={!isLoading && !errorMessage}
