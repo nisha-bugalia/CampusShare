@@ -13,6 +13,7 @@ import {
   Keyboard,
   AppState,
   AppStateStatus,
+  LayoutChangeEvent,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
@@ -60,6 +61,10 @@ export default function ChatScreen() {
   const [isSending, setIsSending] = useState<boolean>(false);
   const [keyboardHeight, setKeyboardHeight] = useState<number>(0);
   const [isKeyboardVisible, setIsKeyboardVisible] = useState<boolean>(false);
+  const [initialContainerHeight, setInitialContainerHeight] = useState<number>(0);
+  const [currentContainerHeight, setCurrentContainerHeight] = useState<number>(0);
+  const isKeyboardVisibleRef = useRef<boolean>(false);
+  const lastKeyboardHeightRef = useRef<number>(0);
 
   const flatListRef = useRef<FlatList<DbMessage>>(null);
 
@@ -76,7 +81,10 @@ export default function ChatScreen() {
     const showSub = Keyboard.addListener(
       Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow',
       (e) => {
-        setKeyboardHeight(e.endCoordinates.height);
+        const height = e.endCoordinates.height;
+        lastKeyboardHeightRef.current = height;
+        isKeyboardVisibleRef.current = true;
+        setKeyboardHeight(height);
         setIsKeyboardVisible(true);
         setTimeout(() => {
           flatListRef.current?.scrollToEnd({ animated: true });
@@ -87,6 +95,7 @@ export default function ChatScreen() {
     const hideSub = Keyboard.addListener(
       Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide',
       () => {
+        isKeyboardVisibleRef.current = false;
         setKeyboardHeight(0);
         setIsKeyboardVisible(false);
       }
@@ -97,6 +106,15 @@ export default function ChatScreen() {
       hideSub.remove();
     };
   }, []);
+
+  const handleContainerLayout = (event: LayoutChangeEvent) => {
+    const { height } = event.nativeEvent.layout;
+    if (height <= 0) return;
+    setCurrentContainerHeight(height);
+    if (!isKeyboardVisibleRef.current) {
+      setInitialContainerHeight((prev) => (prev === 0 ? height : Math.max(prev, height)));
+    }
+  };
 
   // ── Active Chat Presence & Stale Protection ──
   useEffect(() => {
@@ -371,6 +389,26 @@ export default function ChatScreen() {
     }, 100);
   };
 
+  // Check if native Android windowSoftInputMode already shrunk the window:
+  const windowShrinkage =
+    Platform.OS === 'android' && initialContainerHeight > 0 && currentContainerHeight > 0
+      ? Math.max(0, initialContainerHeight - currentContainerHeight)
+      : 0;
+
+  // In edge-to-edge Android, IME covers keyboardHeight + insets.bottom.
+  // Subtract any amount the window already shrunk to prevent double-shifting:
+  const effectiveKeyboardHeight =
+    keyboardHeight > 0
+      ? keyboardHeight
+      : isKeyboardVisible && lastKeyboardHeightRef.current > 0
+        ? lastKeyboardHeightRef.current
+        : 0;
+
+  const androidBottomOffset =
+    Platform.OS === 'android' && effectiveKeyboardHeight > 0
+      ? Math.max(0, effectiveKeyboardHeight + insets.bottom - windowShrinkage)
+      : 0;
+
   const headerTitle = convoDetails?.otherUser?.name || 'Chat';
   const headerSubtitle = convoDetails?.title
     ? convoDetails.title
@@ -436,7 +474,13 @@ export default function ChatScreen() {
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
       >
-        <View style={styles.mainContent}>
+        <View
+          style={[
+            styles.mainContent,
+            Platform.OS === 'android' && { paddingBottom: androidBottomOffset },
+          ]}
+          onLayout={handleContainerLayout}
+        >
           {/* Blocked user banner */}
           {blockStatus.isBidirectional && (
             <View style={styles.blockedBanner}>
@@ -574,7 +618,11 @@ export default function ChatScreen() {
                   value={inputText}
                   onChangeText={setInputText}
                   onFocus={() => {
+                    isKeyboardVisibleRef.current = true;
                     setIsKeyboardVisible(true);
+                    if (lastKeyboardHeightRef.current > 0) {
+                      setKeyboardHeight(lastKeyboardHeightRef.current);
+                    }
                     setTimeout(() => {
                       flatListRef.current?.scrollToEnd({ animated: true });
                     }, 50);
