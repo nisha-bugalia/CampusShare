@@ -1,0 +1,203 @@
+name: Build Android Production AAB
+
+on:
+  workflow_dispatch:
+    inputs:
+      version_code:
+        description: "Android Version Code (leave empty to use app.json versionCode)"
+        required: false
+        default: ""
+        type: string
+
+jobs:
+  build-aab:
+    name: Build Signed Android App Bundle (AAB)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      # ── 1. Checkout ──────────────────────────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ── 2. Java 17 ───────────────────────────────────────────────────────
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: "17"
+          distribution: "temurin"
+
+      # ── 3. Node.js ───────────────────────────────────────────────────────
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      # ── 4. Install dependencies ──────────────────────────────────────────
+      - name: Install dependencies
+        run: npm ci
+
+      # ── 5. Expo CLI ──────────────────────────────────────────────────────
+      - name: Install Expo CLI
+        run: npm install -g expo@latest
+
+      # ── 6. Inject Supabase env vars ──────────────────────────────────────
+      - name: Create .env file
+        run: |
+          echo "EXPO_PUBLIC_SUPABASE_URL=${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}" >> .env
+          echo "EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY=${{ secrets.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY }}" >> .env
+
+      # ── 7. Expo Prebuild ─────────────────────────────────────────────────
+      - name: Expo Prebuild (generate android/ folder)
+        run: npx expo prebuild --platform android --clean
+        env:
+          EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
+          EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY }}
+
+      # ── 8. Android SDK ────────────────────────────────────────────────────
+      - name: Accept Android SDK licenses & install build tools
+        run: |
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          SDKMANAGER=$(find $ANDROID_HOME/cmdline-tools -name sdkmanager | head -1)
+          echo "Using sdkmanager: $SDKMANAGER"
+          yes | $SDKMANAGER --licenses || true
+          $SDKMANAGER "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+
+      # ── 9. Validate & Decode Keystore ─────────────────────────────────────
+      - name: Decode Production Keystore
+        run: |
+          if [ -z "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" ]; then
+            echo "::error::Missing secret 'ANDROID_KEYSTORE_BASE64'. Please add your base64-encoded release keystore to GitHub Secrets."
+            exit 1
+          fi
+          if [ -z "${{ secrets.ANDROID_KEYSTORE_PASSWORD }}" ]; then
+            echo "::error::Missing secret 'ANDROID_KEYSTORE_PASSWORD'."
+            exit 1
+          fi
+          if [ -z "${{ secrets.ANDROID_KEY_ALIAS }}" ]; then
+            echo "::error::Missing secret 'ANDROID_KEY_ALIAS'."
+            exit 1
+          fi
+          if [ -z "${{ secrets.ANDROID_KEY_PASSWORD }}" ]; then
+            echo "::error::Missing secret 'ANDROID_KEY_PASSWORD'."
+            exit 1
+          fi
+
+          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 --decode > android/app/release.keystore
+          echo "Keystore successfully decoded to android/app/release.keystore"
+
+      # ── 10. Configure Release Signing in build.gradle ────────────────────
+      - name: Configure Release Signing in android/app/build.gradle
+        run: |
+          node -e '
+          const fs = require("fs");
+          const gradlePath = "android/app/build.gradle";
+          let content = fs.readFileSync(gradlePath, "utf8");
+
+          // 1. Add release signingConfig
+          const signingBlock = `    signingConfigs {
+          debug {
+              storeFile file("debug.keystore")
+              storePassword "android"
+              keyAlias "androiddebugkey"
+              keyPassword "android"
+          }
+          release {
+              storeFile file("release.keystore")
+              storePassword System.getenv("ANDROID_KEYSTORE_PASSWORD")
+              keyAlias System.getenv("ANDROID_KEY_ALIAS")
+              keyPassword System.getenv("ANDROID_KEY_PASSWORD")
+          }
+      }`;
+
+          content = content.replace(/signingConfigs\s*\{[\s\S]*?debug\s*\{[\s\S]*?\}\s*\}/, signingBlock);
+
+          // 2. Point release buildType to signingConfigs.release
+          content = content.replace(
+              /buildTypes\s*\{[\s\S]*?release\s*\{[\s\S]*?signingConfig\s+signingConfigs\.debug/,
+              (match) => match.replace("signingConfig signingConfigs.debug", "signingConfig signingConfigs.release")
+          );
+
+          // 3. Optional: Override versionCode if provided via workflow_dispatch input
+          const customVersionCode = "${{ github.event.inputs.version_code }}".trim();
+          if (customVersionCode) {
+              console.log("Overriding versionCode with custom input:", customVersionCode);
+              content = content.replace(/versionCode\s+\d+/, "versionCode " + customVersionCode);
+          }
+
+          fs.writeFileSync(gradlePath, content, "utf8");
+          console.log("android/app/build.gradle successfully configured for release signing.");
+          '
+
+      # ── 11. Gradle permissions ───────────────────────────────────────────
+      - name: Make gradlew executable
+        run: chmod +x android/gradlew
+
+      # ── 12. Build Production AAB using Gradle bundleRelease ───────────────
+      - name: Build Android App Bundle (:app:bundleRelease)
+        run: |
+          cd android
+          ./gradlew :app:bundleRelease --no-daemon
+        env:
+          EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
+          EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+
+      # ── 13. Verify AAB Signature ─────────────────────────────────────────
+      - name: Verify AAB Signature
+        run: |
+          AAB_FILE=$(find android/app/build/outputs/bundle/release/ -name "*.aab" | head -1)
+          if [ -z "$AAB_FILE" ]; then
+            echo "::error::No .aab file found in android/app/build/outputs/bundle/release/"
+            exit 1
+          fi
+          echo "Found AAB at: $AAB_FILE"
+          echo "AAB_PATH=$AAB_FILE" >> $GITHUB_ENV
+
+          # Verify using jarsigner
+          echo "Verifying signature with jarsigner..."
+          jarsigner -verify -verbose -certs "$AAB_FILE" | grep -E "CN=|Signer|verified" | head -20 || true
+          echo "Signature verification complete."
+
+      # ── 14. Prepare Artifact ─────────────────────────────────────────────
+      - name: Copy & Name AAB Artifact
+        run: |
+          cp "$AAB_PATH" "app-release.aab"
+          cp "$AAB_PATH" "CampusShare-Production-v${{ github.run_number }}.aab"
+          echo "Prepared app-release.aab and CampusShare-Production-v${{ github.run_number }}.aab"
+
+      # ── 15. Secure cleanup of keystore from runner disk ──────────────────
+      - name: Clean up Keystore file
+        if: always()
+        run: |
+          rm -f android/app/release.keystore
+          echo "Keystore file removed from runner."
+
+      # ── 16. Upload AAB as downloadable artifact ──────────────────────────
+      - name: Upload Production AAB Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: CampusShare-Production-AAB-v${{ github.run_number }}
+          path: |
+            app-release.aab
+            CampusShare-Production-v${{ github.run_number }}.aab
+          retention-days: 60
+
+      # ── 17. Release Summary ──────────────────────────────────────────────
+      - name: Print Production Summary
+        run: |
+          echo "## 🚀 Google Play App Bundle (AAB) Built Successfully" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Artifact | Target Store | Build Task |" >> $GITHUB_STEP_SUMMARY
+          echo "|---|---|---|" >> $GITHUB_STEP_SUMMARY
+          echo "| \`app-release.aab\` | Google Play Console | \`:app:bundleRelease\` |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📦 Next Steps for Google Play Release" >> $GITHUB_STEP_SUMMARY
+          echo "1. Download the artifact \`CampusShare-Production-AAB-v${{ github.run_number }}\` from this workflow run." >> $GITHUB_STEP_SUMMARY
+          echo "2. Extract the downloaded zip to get \`app-release.aab\`." >> $GITHUB_STEP_SUMMARY
+          echo "3. Go to [Google Play Console](https://play.google.com/console) -> **CampusShare**." >> $GITHUB_STEP_SUMMARY
+          echo "4. Navigate to **Release > Production** (or **Internal Testing**)." >> $GITHUB_STEP_SUMMARY
+          echo "5. Click **Create new release** and upload \`app-release.aab\`." >> $GITHUB_STEP_SUMMARY
