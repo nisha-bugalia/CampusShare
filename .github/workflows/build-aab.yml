@@ -87,56 +87,159 @@ jobs:
           echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 --decode > android/app/release.keystore
           echo "Keystore successfully decoded to android/app/release.keystore"
 
-      # ── 10. Configure Release Signing in build.gradle ────────────────────
+      # ── 10. Extract upload keystore SHA1 for later verification ────────────
+      - name: Extract upload keystore certificate SHA1
+        run: |
+          UPLOAD_SHA1=$(keytool -list -v \
+            -keystore android/app/release.keystore \
+            -storepass "$ANDROID_KEYSTORE_PASSWORD" \
+            -alias "$ANDROID_KEY_ALIAS" 2>/dev/null \
+            | grep "SHA1:" | head -1 | sed 's/.*SHA1: *//' | tr -d ' ')
+          if [ -z "$UPLOAD_SHA1" ]; then
+            echo "::error::Could not extract SHA1 from upload keystore. Check ANDROID_KEY_ALIAS and ANDROID_KEYSTORE_PASSWORD."
+            exit 1
+          fi
+          echo "Upload keystore SHA1: $UPLOAD_SHA1"
+          echo "UPLOAD_KEYSTORE_SHA1=$UPLOAD_SHA1" >> $GITHUB_ENV
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+
+      # ── 11. Configure Release Signing in build.gradle ────────────────────
+      #
+      # ROOT CAUSE OF PREVIOUS BUG:
+      # The Expo CNG template build.gradle has TWO occurrences of
+      # "signingConfig signingConfigs.debug" inside the buildTypes block:
+      # one in debug{} and one in release{}. The old code used
+      # match.replace("signingConfig signingConfigs.debug", "...")
+      # which is a plain-string replace that only changes the FIRST
+      # occurrence — the debug buildType — leaving the release buildType
+      # still pointing at signingConfigs.debug.
+      #
+      # FIX: Use a single literal string match-and-replace that covers
+      # both the signingConfigs and buildTypes blocks together, so each
+      # buildType gets the correct signingConfig without any ambiguity.
+      #
       - name: Configure Release Signing in android/app/build.gradle
         run: |
-          node -e '
+          node << 'PATCH_SCRIPT'
           const fs = require("fs");
           const gradlePath = "android/app/build.gradle";
           let content = fs.readFileSync(gradlePath, "utf8");
 
-          // 1. Add release signingConfig
-          const signingBlock = [
-              "    signingConfigs {",
-              "        debug {",
-              "            storeFile file(\"debug.keystore\")",
-              "            storePassword \"android\"",
-              "            keyAlias \"androiddebugkey\"",
-              "            keyPassword \"android\"",
-              "        }",
-              "        release {",
-              "            storeFile file(\"release.keystore\")",
-              "            storePassword System.getenv(\"ANDROID_KEYSTORE_PASSWORD\")",
-              "            keyAlias System.getenv(\"ANDROID_KEY_ALIAS\")",
-              "            keyPassword System.getenv(\"ANDROID_KEY_PASSWORD\")",
-              "        }",
-              "    }"
+          // Normalize line endings
+          content = content.replace(/\r\n/g, "\n");
+
+          // The exact block produced by Expo CNG prebuild (SDK 57)
+          const target = [
+            "    signingConfigs {",
+            "        debug {",
+            "            storeFile file('debug.keystore')",
+            "            storePassword 'android'",
+            "            keyAlias 'androiddebugkey'",
+            "            keyPassword 'android'",
+            "        }",
+            "    }",
+            "    buildTypes {",
+            "        debug {",
+            "            signingConfig signingConfigs.debug",
+            "        }",
+            "        release {",
+            "            // Caution! In production, you need to generate your own keystore file.",
+            "            // see https://reactnative.dev/docs/signed-apk-android.",
+            "            signingConfig signingConfigs.debug"
           ].join("\n");
 
-          content = content.replace(/signingConfigs\s*\{[\s\S]*?debug\s*\{[\s\S]*?\}\s*\}/, signingBlock);
+          const replacement = [
+            "    signingConfigs {",
+            "        debug {",
+            "            storeFile file('debug.keystore')",
+            "            storePassword 'android'",
+            "            keyAlias 'androiddebugkey'",
+            "            keyPassword 'android'",
+            "        }",
+            "        release {",
+            "            storeFile file('release.keystore')",
+            "            storePassword System.getenv('ANDROID_KEYSTORE_PASSWORD')",
+            "            keyAlias System.getenv('ANDROID_KEY_ALIAS')",
+            "            keyPassword System.getenv('ANDROID_KEY_PASSWORD')",
+            "        }",
+            "    }",
+            "    buildTypes {",
+            "        debug {",
+            "            signingConfig signingConfigs.debug",
+            "        }",
+            "        release {",
+            "            signingConfig signingConfigs.release"
+          ].join("\n");
 
-          // 2. Point release buildType to signingConfigs.release
-          content = content.replace(
-              /buildTypes\s*\{[\s\S]*?release\s*\{[\s\S]*?signingConfig\s+signingConfigs\.debug/,
-              (match) => match.replace("signingConfig signingConfigs.debug", "signingConfig signingConfigs.release")
-          );
+          if (!content.includes(target)) {
+            console.error("FATAL: Expected Expo CNG signing/buildTypes block not found in build.gradle.");
+            console.error("The template may have changed. Manual inspection required.");
+            process.exit(1);
+          }
 
-          // 3. Optional: Override versionCode if provided via workflow_dispatch input
-          const customVersionCode = "${{ github.event.inputs.version_code }}".trim();
+          content = content.replace(target, replacement);
+
+          // Optional: Override versionCode if provided via workflow_dispatch input
+          const customVersionCode = process.env.INPUT_VERSION_CODE || "";
           if (customVersionCode) {
-              console.log("Overriding versionCode with custom input:", customVersionCode);
-              content = content.replace(/versionCode\s+\d+/, "versionCode " + customVersionCode);
+            console.log("Overriding versionCode with custom input:", customVersionCode);
+            content = content.replace(/versionCode\s+\d+/, "versionCode " + customVersionCode);
           }
 
           fs.writeFileSync(gradlePath, content, "utf8");
-          console.log("android/app/build.gradle successfully configured for release signing.");
-          '
 
-      # ── 11. Gradle permissions ───────────────────────────────────────────
+          // ── Post-patch validation ──
+          const patched = fs.readFileSync(gradlePath, "utf8");
+
+          // Verify signingConfigs.release exists with env vars
+          if (!patched.includes("System.getenv('ANDROID_KEYSTORE_PASSWORD')")) {
+            console.error("FATAL: signingConfigs.release missing ANDROID_KEYSTORE_PASSWORD after patch.");
+            process.exit(1);
+          }
+
+          // Verify release buildType uses signingConfigs.release
+          const btBlock = patched.match(/buildTypes\s*\{([\s\S]*?)\n    \}/);
+          if (!btBlock) {
+            console.error("FATAL: buildTypes block not found after patch.");
+            process.exit(1);
+          }
+          const btBody = btBlock[1];
+
+          const debugBt = btBody.match(/debug\s*\{[\s\S]*?signingConfig\s+(\S+)/);
+          const releaseBt = btBody.match(/release\s*\{[\s\S]*?signingConfig\s+(\S+)/);
+
+          if (!debugBt || debugBt[1] !== "signingConfigs.debug") {
+            console.error("FATAL: debug buildType is NOT using signingConfigs.debug! Found:", debugBt ? debugBt[1] : "none");
+            process.exit(1);
+          }
+          if (!releaseBt || releaseBt[1] !== "signingConfigs.release") {
+            console.error("FATAL: release buildType is NOT using signingConfigs.release! Found:", releaseBt ? releaseBt[1] : "none");
+            process.exit(1);
+          }
+
+          console.log("✅ build.gradle patched and validated successfully.");
+          console.log("   debug  buildType → signingConfigs.debug");
+          console.log("   release buildType → signingConfigs.release");
+          PATCH_SCRIPT
+        env:
+          INPUT_VERSION_CODE: ${{ github.event.inputs.version_code }}
+
+      # ── 12. Print patched signing sections for audit ──────────────────────
+      - name: Print patched build.gradle signing sections
+        run: |
+          echo "=== signingConfigs block ==="
+          sed -n '/signingConfigs {/,/^    }/p' android/app/build.gradle
+          echo ""
+          echo "=== buildTypes block ==="
+          sed -n '/buildTypes {/,/^    }/p' android/app/build.gradle
+
+      # ── 13. Gradle permissions ───────────────────────────────────────────
       - name: Make gradlew executable
         run: chmod +x android/gradlew
 
-      # ── 12. Build Production AAB using Gradle bundleRelease ───────────────
+      # ── 14. Build Production AAB using Gradle bundleRelease ───────────────
       - name: Build Android App Bundle (:app:bundleRelease)
         run: |
           cd android
@@ -148,8 +251,12 @@ jobs:
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
 
-      # ── 13. Verify AAB Signature ─────────────────────────────────────────
-      - name: Verify AAB Signature
+      # ── 15. Strict AAB Signature Verification ─────────────────────────────
+      #   FAILS the workflow if:
+      #   - No AAB file is found
+      #   - The AAB is signed with the Android Debug certificate
+      #   - The AAB SHA1 does not match the upload keystore SHA1
+      - name: Verify AAB Signature (strict — fails on debug cert)
         run: |
           AAB_FILE=$(find android/app/build/outputs/bundle/release/ -name "*.aab" | head -1)
           if [ -z "$AAB_FILE" ]; then
@@ -159,26 +266,51 @@ jobs:
           echo "Found AAB at: $AAB_FILE"
           echo "AAB_PATH=$AAB_FILE" >> $GITHUB_ENV
 
-          # Verify using jarsigner
-          echo "Verifying signature with jarsigner..."
-          jarsigner -verify -verbose -certs "$AAB_FILE" | grep -E "CN=|Signer|verified" | head -20 || true
-          echo "Signature verification complete."
+          # Extract the signer certificate info
+          CERT_INFO=$(keytool -printcert -jarfile "$AAB_FILE" 2>&1) || true
+          echo "$CERT_INFO"
 
-      # ── 14. Prepare Artifact ─────────────────────────────────────────────
+          # FAIL if signed with Android Debug certificate
+          if echo "$CERT_INFO" | grep -qi "CN=Android Debug"; then
+            echo ""
+            echo "::error::╔══════════════════════════════════════════════════════════════╗"
+            echo "::error::║  SIGNING FAILURE: AAB is signed with Android Debug key!     ║"
+            echo "::error::║  The release keystore was NOT applied to the build.          ║"
+            echo "::error::╚══════════════════════════════════════════════════════════════╝"
+            exit 1
+          fi
+
+          # Extract AAB SHA1 and compare with upload keystore SHA1
+          AAB_SHA1=$(echo "$CERT_INFO" | grep "SHA1:" | head -1 | sed 's/.*SHA1: *//' | tr -d ' ')
+          echo "AAB certificate SHA1:       $AAB_SHA1"
+          echo "Upload keystore SHA1:       $UPLOAD_KEYSTORE_SHA1"
+
+          if [ "$AAB_SHA1" != "$UPLOAD_KEYSTORE_SHA1" ]; then
+            echo ""
+            echo "::error::╔══════════════════════════════════════════════════════════════╗"
+            echo "::error::║  SIGNING MISMATCH: AAB SHA1 does not match upload keystore! ║"
+            echo "::error::╚══════════════════════════════════════════════════════════════╝"
+            exit 1
+          fi
+
+          echo ""
+          echo "✅ AAB is correctly signed with the production upload keystore."
+
+      # ── 16. Prepare Artifact ─────────────────────────────────────────────
       - name: Copy & Name AAB Artifact
         run: |
           cp "$AAB_PATH" "app-release.aab"
           cp "$AAB_PATH" "CampusShare-Production-v${{ github.run_number }}.aab"
           echo "Prepared app-release.aab and CampusShare-Production-v${{ github.run_number }}.aab"
 
-      # ── 15. Secure cleanup of keystore from runner disk ──────────────────
+      # ── 17. Secure cleanup of keystore from runner disk ──────────────────
       - name: Clean up Keystore file
         if: always()
         run: |
           rm -f android/app/release.keystore
           echo "Keystore file removed from runner."
 
-      # ── 16. Upload AAB as downloadable artifact ──────────────────────────
+      # ── 18. Upload AAB as downloadable artifact ──────────────────────────
       - name: Upload Production AAB Artifact
         uses: actions/upload-artifact@v4
         with:
@@ -188,7 +320,7 @@ jobs:
             CampusShare-Production-v${{ github.run_number }}.aab
           retention-days: 60
 
-      # ── 17. Release Summary ──────────────────────────────────────────────
+      # ── 19. Release Summary ──────────────────────────────────────────────
       - name: Print Production Summary
         run: |
           echo "## 🚀 Google Play App Bundle (AAB) Built Successfully" >> $GITHUB_STEP_SUMMARY
